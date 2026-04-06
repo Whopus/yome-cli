@@ -1,17 +1,32 @@
 {
-  "name": "yome",
-  "version": "0.1.0",
+  "name": "@sobers/yome",
+  "version": "0.0.1",
   "description": "Yome CLI — AI coding agent",
   "type": "module",
   "bin": {
-    "yome": "./bin/yome.mjs"
+    "yome": "bin/yome.js"
   },
+  "files": [
+    "bin",
+    "dist"
+  ],
   "scripts": {
-    "build": "bun build src/index.tsx --outdir dist --target bun --external react --external ink --external ink-text-input",
+    "build": "tsc",
     "dev": "bun --watch src/index.tsx",
-    "start": "bun bin/yome.mjs",
-    "compile": "bun build src/index.tsx --compile --outfile yome"
+    "start": "node bin/yome.mjs",
+    "prepublishOnly": "npm run build"
   },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "coding",
+    "agent",
+    "yome"
+  ],
+  "license": "MIT",
   "dependencies": {
     "fast-glob": "^3.3.2",
     "ink": "^5.1.0",

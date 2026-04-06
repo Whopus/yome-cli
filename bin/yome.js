@@ -1,2 +1,2 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import '../dist/index.js';
