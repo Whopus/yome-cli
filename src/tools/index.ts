@@ -1,4 +1,6 @@
 import type { ToolDef, AnthropicTool } from '../types.js';
+import type { ToolPermissionContext, PermissionDecision } from '../permissions/types.js';
+import { checkPermission } from '../permissions/checker.js';
 import { readTool } from './read.js';
 import { editTool } from './edit.js';
 import { writeTool } from './write.js';
@@ -42,6 +44,30 @@ export function getAnthropicTools(): AnthropicTool[] {
   }));
 }
 
+/** Current permission context — set via setPermissionContext(). */
+let _permCtx: ToolPermissionContext | null = null;
+
+/** Callback invoked when a tool needs user approval. */
+let _askPermissionFn: ((toolName: string, message: string, input: Record<string, unknown>) => Promise<boolean>) | null = null;
+
+export function setPermissionContext(ctx: ToolPermissionContext): void {
+  _permCtx = ctx;
+}
+
+export function getPermissionContext(): ToolPermissionContext | null {
+  return _permCtx;
+}
+
+/**
+ * Register a callback that will be called when a tool requires user approval.
+ * Return true to allow, false to deny.
+ */
+export function setAskPermissionHandler(
+  fn: (toolName: string, message: string, input: Record<string, unknown>) => Promise<boolean>,
+): void {
+  _askPermissionFn = fn;
+}
+
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -55,6 +81,31 @@ export async function executeTool(
     const validation = tool.validateInput(input);
     if (!validation.valid) {
       return `Error: ${validation.error}`;
+    }
+  }
+
+  // Permission check
+  if (_permCtx) {
+    const toolResult = tool.checkPermissions?.(input, _permCtx);
+    const decision: PermissionDecision = checkPermission(
+      tool.name,
+      tool.isReadOnly(),
+      _permCtx,
+      toolResult ?? undefined,
+    );
+
+    if (decision.behavior === 'deny') {
+      return `Permission denied: ${decision.message}`;
+    }
+
+    if (decision.behavior === 'ask') {
+      if (_askPermissionFn) {
+        const allowed = await _askPermissionFn(tool.name, decision.message, input);
+        if (!allowed) {
+          return `Permission denied by user for ${tool.name}.`;
+        }
+      }
+      // If no handler is registered, fall through and allow (default permissive)
     }
   }
 

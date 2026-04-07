@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import type { PermissionMode } from '../permissions/types.js';
 
 export interface SlashCommand {
   name: string;
@@ -14,9 +15,24 @@ interface InputBarProps {
   model?: string;
   loopName: string;
   slashCommands?: SlashCommand[];
+  permissionMode?: PermissionMode;
 }
 
-export function InputBar({ value, onChange, onSubmit, model, loopName, slashCommands = [] }: InputBarProps) {
+const MAX_VISIBLE = 5;
+
+function getPermissionLabel(mode: PermissionMode): { text: string; color: string } {
+  switch (mode) {
+    case 'bypassPermissions':
+      return { text: 'Bypass - all commands allowed', color: '#FF6B6B' };
+    case 'acceptEdits':
+      return { text: 'Auto - edit and read-only commands', color: '#E7BD1F' };
+    case 'default':
+    default:
+      return { text: 'Default - ask before write operations', color: '#7EC8E3' };
+  }
+}
+
+export function InputBar({ value, onChange, onSubmit, model, loopName, slashCommands = [], permissionMode = 'default' }: InputBarProps) {
   const [cursor, setCursor] = useState(0);
 
   const filtered = useMemo(() => {
@@ -27,7 +43,6 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
 
   const showSuggestions = filtered.length > 0 && value.startsWith('/') && !value.includes(' ');
 
-  // Reset cursor when filtered list changes
   useMemo(() => {
     setCursor(0);
   }, [filtered.length]);
@@ -40,7 +55,6 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
     if (showSuggestions && filtered[cursor]) {
       const selected = '/' + filtered[cursor]!.name;
       onChange(selected);
-      // If it's a complete command (like /skills, /agents), submit directly
       onSubmit(selected);
     } else {
       onSubmit(v);
@@ -64,24 +78,26 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
     ? Math.max(...filtered.map((c) => c.name.length))
     : 0;
 
+  // Compute visible window for scrollable slash menu
+  const visibleStart = useMemo(() => {
+    if (filtered.length <= MAX_VISIBLE) return 0;
+    const half = Math.floor(MAX_VISIBLE / 2);
+    let start = cursor - half;
+    if (start < 0) start = 0;
+    if (start + MAX_VISIBLE > filtered.length) start = filtered.length - MAX_VISIBLE;
+    return start;
+  }, [cursor, filtered.length]);
+
+  const visibleItems = showSuggestions ? filtered.slice(visibleStart, visibleStart + MAX_VISIBLE) : [];
+  const hasScrollUp = visibleStart > 0;
+  const hasScrollDown = visibleStart + MAX_VISIBLE < filtered.length;
+
+  const perm = getPermissionLabel(permissionMode);
+
   return (
     <Box flexDirection="column" marginTop={1}>
-      {showSuggestions && (
-        <Box flexDirection="column" paddingX={1} marginBottom={0}>
-          {filtered.map((item, i) => {
-            const isFocused = i === cursor;
-            const padded = ('/' + item.name).padEnd(maxNameLen + 3);
-            return (
-              <Box key={item.name}>
-                <Text color={isFocused ? 'cyan' : 'yellow'} bold={isFocused}>{padded}</Text>
-                <Text dimColor={!isFocused}>{item.description}</Text>
-              </Box>
-            );
-          })}
-        </Box>
-      )}
       <Box paddingX={1} justifyContent="space-between">
-        <Text color="#E7BD1F">Auto ({loopName}) - edit and read-only commands</Text>
+        <Text color={perm.color}>{perm.text}</Text>
         <Text dimColor>{model || 'qwen-plus'}</Text>
       </Box>
       <Box borderStyle="round" borderColor="gray" paddingX={1}>
@@ -93,6 +109,31 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
           placeholder=""
         />
       </Box>
+      {showSuggestions && (
+        <Box flexDirection="column" paddingX={1} marginTop={0}>
+          {hasScrollUp && (
+            <Box>
+              <Text dimColor>  {'↑'} more</Text>
+            </Box>
+          )}
+          {visibleItems.map((item, vi) => {
+            const realIdx = visibleStart + vi;
+            const isFocused = realIdx === cursor;
+            const padded = ('/' + item.name).padEnd(maxNameLen + 3);
+            return (
+              <Box key={item.name}>
+                <Text color={isFocused ? 'cyan' : 'yellow'} bold={isFocused}>{padded}</Text>
+                <Text dimColor={!isFocused}>{item.description}</Text>
+              </Box>
+            );
+          })}
+          {hasScrollDown && (
+            <Box>
+              <Text dimColor>  {'↓'} more</Text>
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

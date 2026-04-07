@@ -52,6 +52,11 @@ export type ToolValidationResult =
   | { valid: true }
   | { valid: false; error: string };
 
+/** Re-export PermissionResult so tools can return it from checkPermissions. */
+export type { PermissionResult } from './permissions/types.js';
+import type { PermissionResult } from './permissions/types.js';
+import type { ToolPermissionContext } from './permissions/types.js';
+
 export interface ToolDef {
   readonly name: string;
   readonly description: string;
@@ -68,6 +73,13 @@ export interface ToolDef {
 
   /** Extract primary file/dir path from input (for display, permissions). */
   getPath?(input: Record<string, unknown>): string | undefined;
+
+  /**
+   * Tool-specific permission check. Called before the global permission
+   * checker to let tools inspect input and apply content-specific rules
+   * (e.g. Bash prefix matching). Return null to defer to the global check.
+   */
+  checkPermissions?(input: Record<string, unknown>, ctx: ToolPermissionContext): PermissionResult;
 
   /** Execute the tool. Receives an AbortSignal for cancellation. */
   execute(input: Record<string, unknown>, signal?: AbortSignal): Promise<string>;

@@ -1,17 +1,23 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Agent } from '../agent.js';
-import { getVersion } from '../config.js';
+import { getVersion, loadModelEntries } from '../config.js';
+import type { ModelEntry } from '../config.js';
 import { isSkillDisabled, isAgentDisabled, toggleSkill, toggleAgent } from '../toggleState.js';
+import { addPermissionRuleToUserSettings } from '../permissions/loader.js';
+import { serializeRuleValue } from '../permissions/ruleParser.js';
 import { MessageList, getToolLabel, getToolDetail } from './MessageList.js';
 import { InputBar } from './InputBar.js';
 import type { SlashCommand } from './InputBar.js';
 import { Banner } from './Banner.js';
 import { AgentPicker } from './AgentPicker.js';
+import { ModelPicker } from './ModelPicker.js';
+import { PermissionPrompt } from './PermissionPrompt.js';
 import { TogglePicker } from './TogglePicker.js';
 import type { ToggleItem } from './TogglePicker.js';
 import type { Message } from './MessageList.js';
 import type { YomeConfig } from '../config.js';
+import type { PermissionMode } from '../permissions/types.js';
 
 interface AppProps {
   config: YomeConfig;
@@ -24,12 +30,23 @@ export function App({ config }: AppProps) {
   const [inputValue, setInputValue] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const [showAgentsPicker, setShowAgentsPicker] = useState(false);
+  const [currentModelDisplay, setCurrentModelDisplay] = useState<string | undefined>(config.model);
+  const [pendingPermission, setPendingPermission] = useState<{
+    toolName: string;
+    message: string;
+    detail: string;
+    resolve: (allowed: boolean) => void;
+  } | null>(null);
+  const pendingPermissionRef = useRef(pendingPermission);
+  pendingPermissionRef.current = pendingPermission;
   const [pickerVersion, setPickerVersion] = useState(0);
   const [usage, setUsage] = useState({ inputTokens: 0, outputTokens: 0 });
   const [agent] = useState(() => new Agent(config));
   const [loopName, setLoopName] = useState(() => agent.getCurrentLoopName());
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => agent.getPermissionContext().mode);
   const version = getVersion();
 
   const handleSubmit = useCallback(
@@ -58,6 +75,12 @@ export function App({ config }: AppProps) {
         return;
       }
 
+      // /model — open model picker
+      if (prompt === '/model') {
+        setShowModelPicker(true);
+        return;
+      }
+
       setMessages((prev) => [...prev, { type: 'user', content: prompt }]);
       setStreamText('');
       setIsRunning(true);
@@ -65,6 +88,14 @@ export function App({ config }: AppProps) {
       let currentText = '';
 
       await agent.run(prompt, {
+        async onAskPermission(toolName, message, input) {
+          const detail = toolName === 'Bash'
+            ? (input.command as string) ?? ''
+            : (input.file_path as string) ?? '';
+          return new Promise<boolean>((resolve) => {
+            setPendingPermission({ toolName, message, detail, resolve });
+          });
+        },
         onTextDelta(delta) {
           currentText += delta;
           setStreamText(currentText);
@@ -135,6 +166,52 @@ export function App({ config }: AppProps) {
     setShowAgentPicker(false);
   }, []);
 
+  const handleModelSelect = useCallback(
+    (entry: ModelEntry) => {
+      agent.switchModel(entry);
+      setCurrentModelDisplay(entry.displayName);
+      setShowModelPicker(false);
+      setMessages((prev) => [
+        ...prev,
+        { type: 'text', content: `Switched to model **${entry.displayName}** (${entry.model}).` },
+      ]);
+    },
+    [agent],
+  );
+
+  const handleModelCancel = useCallback(() => {
+    setShowModelPicker(false);
+  }, []);
+
+  const handlePermissionAllow = useCallback(() => {
+    if (pendingPermissionRef.current) {
+      pendingPermissionRef.current.resolve(true);
+      setPendingPermission(null);
+    }
+  }, []);
+
+  const handlePermissionDeny = useCallback(() => {
+    if (pendingPermissionRef.current) {
+      pendingPermissionRef.current.resolve(false);
+      setPendingPermission(null);
+    }
+  }, []);
+
+  const handlePermissionAlwaysAllow = useCallback(() => {
+    if (pendingPermissionRef.current) {
+      const { toolName } = pendingPermissionRef.current;
+      addPermissionRuleToUserSettings(toolName, 'allow');
+      // Also update the in-memory context so it takes effect immediately
+      agent.switchPermissionMode(agent.getPermissionContext().mode); // triggers re-init won't help — we need to reload
+      pendingPermissionRef.current.resolve(true);
+      setPendingPermission(null);
+      setMessages((prev) => [
+        ...prev,
+        { type: 'text', content: `**${toolName}** added to always-allow rules.` },
+      ]);
+    }
+  }, [agent]);
+
   const buildSkillItems = useCallback((): ToggleItem[] => {
     return agent.getSkills().map((s) => ({
       name: s.name,
@@ -173,14 +250,23 @@ export function App({ config }: AppProps) {
     if (initialPrompt) handleSubmit(initialPrompt);
   }, []);
 
-  const isPickerOpen = showAgentPicker || showSkillsPicker || showAgentsPicker;
+  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || pendingPermission !== null;
+
+  const PERMISSION_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
   useInput((input, key) => {
     if (!isPickerOpen && key.ctrl && input === 'c') exit();
+    if (!isPickerOpen && !isRunning && key.shift && key.tab) {
+      const idx = PERMISSION_CYCLE.indexOf(permissionMode);
+      const next = PERMISSION_CYCLE[(idx + 1) % PERMISSION_CYCLE.length]!;
+      agent.switchPermissionMode(next);
+      setPermissionMode(next);
+    }
   });
 
   const slashCommands: SlashCommand[] = React.useMemo(() => {
     const builtIn: SlashCommand[] = [
+      { name: 'model', description: 'Switch model' },
       { name: 'skills', description: 'Manage skills (enable/disable)' },
       { name: 'subagents', description: 'Manage subagents (enable/disable)' },
       { name: 'agent', description: 'Switch agent loop mode' },
@@ -237,6 +323,17 @@ export function App({ config }: AppProps) {
         </Box>
       )}
 
+      {showModelPicker && (
+        <Box marginTop={1}>
+          <ModelPicker
+            models={loadModelEntries()}
+            currentModel={agent.getConfig().model}
+            onSelect={handleModelSelect}
+            onCancel={handleModelCancel}
+          />
+        </Box>
+      )}
+
       {showAgentsPicker && (
         <Box marginTop={1}>
           <TogglePicker
@@ -250,14 +347,26 @@ export function App({ config }: AppProps) {
         </Box>
       )}
 
+      {pendingPermission && (
+        <PermissionPrompt
+          toolName={pendingPermission.toolName}
+          message={pendingPermission.message}
+          detail={pendingPermission.detail}
+          onAllow={handlePermissionAllow}
+          onDeny={handlePermissionDeny}
+          onAlwaysAllow={handlePermissionAlwaysAllow}
+        />
+      )}
+
       {!isRunning && !isPickerOpen && (
         <InputBar
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSubmit}
-          model={config.model}
+          model={currentModelDisplay}
           loopName={loopName}
           slashCommands={slashCommands}
+          permissionMode={permissionMode}
         />
       )}
     </Box>

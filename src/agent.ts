@@ -1,16 +1,20 @@
 import { buildSystemPrompt } from './context.js';
-import { getAnthropicTools, executeTool, registerTool } from './tools/index.js';
+import { getAnthropicTools, executeTool, registerTool, setPermissionContext, setAskPermissionHandler, getPermissionContext } from './tools/index.js';
 import { loadAllSkills } from './skills/index.js';
 import { createLoopRegistry } from './loops/index.js';
 import { createAgentTool, clearAgentCache, getAllAgents } from './subagent/index.js';
+import { initializePermissionContext } from './permissions/loader.js';
+import type { ToolPermissionContext, PermissionMode } from './permissions/types.js';
 import type { Skill } from './skills/index.js';
 import type { AgentDefinition } from './subagent/index.js';
 import type { AgentMessage } from './types.js';
-import type { YomeConfig } from './config.js';
+import type { YomeConfig, ModelEntry } from './config.js';
+import { modelEntryToConfig } from './config.js';
 import type { AgentLoopCallbacks } from './loops/index.js';
 
 export interface AgentCallbacks extends AgentLoopCallbacks {
   onLoopChanged?: (name: string) => void;
+  onAskPermission?: (toolName: string, message: string, input: Record<string, unknown>) => Promise<boolean>;
 }
 
 export class Agent {
@@ -20,12 +24,32 @@ export class Agent {
   private skills: Skill[] = [];
   private loopRegistry = createLoopRegistry();
   private currentLoopName = 'simple';
+  private permissionContext: ToolPermissionContext;
 
   constructor(config: YomeConfig) {
     this.config = config;
     this.systemPrompt = buildSystemPrompt();
     this.skills = loadAllSkills();
     registerTool(createAgentTool(config));
+    this.permissionContext = initializePermissionContext();
+    setPermissionContext(this.permissionContext);
+  }
+
+  getPermissionContext(): ToolPermissionContext {
+    return this.permissionContext;
+  }
+
+  getConfig(): YomeConfig {
+    return this.config;
+  }
+
+  switchModel(entry: ModelEntry): void {
+    this.config = modelEntryToConfig(entry);
+  }
+
+  switchPermissionMode(mode: PermissionMode): void {
+    this.permissionContext = { ...this.permissionContext, mode };
+    setPermissionContext(this.permissionContext);
   }
 
   getSkills(): Skill[] {
@@ -70,6 +94,10 @@ export class Agent {
   }
 
   async run(userMessage: string, callbacks: AgentCallbacks): Promise<void> {
+    if (callbacks.onAskPermission) {
+      setAskPermissionHandler(callbacks.onAskPermission);
+    }
+
     // Handle skill invocation
     const skillInvocation = this.parseSkillInvocation(userMessage);
     let effectiveMessage = userMessage;

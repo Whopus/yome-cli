@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { readFileSync as readPkg } from 'fs';
@@ -12,6 +12,16 @@ export interface YomeConfig {
   baseUrl: string;
   model?: string;
   provider: 'anthropic' | 'openai';
+}
+
+export interface ModelEntry {
+  id: string;
+  displayName: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  provider: 'anthropic' | 'openai';
+  maxOutputTokens?: number;
 }
 
 interface StoredConfig {
@@ -89,4 +99,58 @@ export function getVersion(): string {
     _pkgVersion = '0.1.0';
   }
   return _pkgVersion!;
+}
+
+const SETTINGS_FILE = join(CONFIG_DIR, 'settings.json');
+
+interface SettingsJson {
+  customModels?: Array<{
+    id?: string;
+    displayName?: string;
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    provider?: string;
+    maxOutputTokens?: number;
+  }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Load custom model entries from ~/.yome/settings.json.
+ */
+export function loadModelEntries(): ModelEntry[] {
+  try {
+    if (!existsSync(SETTINGS_FILE)) return [];
+    const raw = readFileSync(SETTINGS_FILE, 'utf-8').trim();
+    if (!raw) return [];
+    const data: SettingsJson = JSON.parse(raw);
+    if (!Array.isArray(data.customModels)) return [];
+
+    return data.customModels
+      .filter((m) => m.model && m.baseUrl && m.apiKey)
+      .map((m) => ({
+        id: m.id ?? m.model!,
+        displayName: m.displayName ?? m.model!,
+        model: m.model!,
+        baseUrl: m.baseUrl!.replace(/\/+$/, ''),
+        apiKey: m.apiKey!,
+        provider: (m.provider === 'openai' ? 'openai' : 'anthropic') as 'anthropic' | 'openai',
+        maxOutputTokens: m.maxOutputTokens,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Convert a ModelEntry to a YomeConfig (for hot-swapping).
+ */
+export function modelEntryToConfig(entry: ModelEntry): YomeConfig {
+  return {
+    apiKey: entry.apiKey,
+    baseUrl: entry.baseUrl,
+    model: entry.model,
+    provider: entry.provider,
+  };
 }

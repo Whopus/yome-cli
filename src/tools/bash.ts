@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
 import type { ToolDef } from '../types.js';
+import type { PermissionResult, ToolPermissionContext } from '../permissions/types.js';
+import { isContentAllowed, isContentDenied } from '../permissions/checker.js';
 
 const MAX_OUTPUT = 20_000;
 
@@ -51,6 +53,16 @@ export const bashTool: ToolDef = {
     required: ['command'],
   },
   isReadOnly() { return false; },
+  checkPermissions(input: Record<string, unknown>, ctx: ToolPermissionContext): PermissionResult {
+    const command = (input.command as string) ?? '';
+    if (isContentDenied(ctx, 'Bash', command)) {
+      return { behavior: 'deny', message: `Command denied by permission rule: ${command}` };
+    }
+    if (isContentAllowed(ctx, 'Bash', command)) {
+      return { behavior: 'allow' };
+    }
+    return { behavior: 'passthrough', message: `Allow Bash to run: ${command}?` };
+  },
   validateInput(input) {
     if (typeof input.command !== 'string' || !input.command.trim()) {
       return { valid: false, error: 'command is required' };
