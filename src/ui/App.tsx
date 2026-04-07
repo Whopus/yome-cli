@@ -12,8 +12,10 @@ import type { SlashCommand } from './InputBar.js';
 import { Banner } from './Banner.js';
 import { AgentPicker } from './AgentPicker.js';
 import { ModelPicker } from './ModelPicker.js';
+import { SessionPicker } from './SessionPicker.js';
 import { PermissionPrompt } from './PermissionPrompt.js';
 import { TogglePicker } from './TogglePicker.js';
+import { listSessions } from '../sessions.js';
 import type { ToggleItem } from './TogglePicker.js';
 import type { Message } from './MessageList.js';
 import type { YomeConfig } from '../config.js';
@@ -36,6 +38,7 @@ export function App({ config }: AppProps) {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const [showAgentsPicker, setShowAgentsPicker] = useState(false);
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [currentModelDisplay, setCurrentModelDisplay] = useState<string | undefined>(config.model);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
@@ -51,6 +54,7 @@ export function App({ config }: AppProps) {
   const [loopName, setLoopName] = useState(() => agent.getCurrentLoopName());
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => agent.getPermissionContext().mode);
   const [pendingImages, setPendingImages] = useState<PastedImage[]>([]);
+  const isFirstMessage = useRef(true);
   const version = getVersion();
 
   const handleSubmit = useCallback(
@@ -58,6 +62,22 @@ export function App({ config }: AppProps) {
       if ((!text.trim() && pendingImages.length === 0) || isRunning) return;
       const prompt = text.trim();
       setInputValue('');
+
+      // /new — reset context and start fresh
+      if (prompt === '/new') {
+        agent.resetContext();
+        setMessages([]);
+        setStreamText('');
+        setUsage({ inputTokens: 0, outputTokens: 0 });
+        isFirstMessage.current = true;
+        return;
+      }
+
+      // /sessions — open session picker
+      if (prompt === '/sessions') {
+        setShowSessionPicker(true);
+        return;
+      }
 
       // /skills — interactive toggle picker
       if (prompt === '/skills') {
@@ -94,6 +114,13 @@ export function App({ config }: AppProps) {
       setMessages((prev) => [...prev, { type: 'user', content: (prompt || '(image)') + imageLabel }]);
       setStreamText('');
       setIsRunning(true);
+
+      // Persist user message to session
+      agent.persistMessage({ role: 'user', content: prompt || '(image)' });
+      if (isFirstMessage.current) {
+        agent.persistTitle(prompt.slice(0, 100) || '(image)');
+        isFirstMessage.current = false;
+      }
 
       let currentText = '';
 
@@ -142,6 +169,7 @@ export function App({ config }: AppProps) {
         onDone(u) {
           if (currentText) {
             setMessages((prev) => [...prev, { type: 'text', content: currentText }]);
+            agent.persistMessage({ role: 'assistant', content: currentText });
             setStreamText('');
           }
           setUsage((prev) => ({
@@ -191,6 +219,43 @@ export function App({ config }: AppProps) {
 
   const handleModelCancel = useCallback(() => {
     setShowModelPicker(false);
+  }, []);
+
+  const handleSessionSelect = useCallback(
+    (sessionId: string) => {
+      agent.restoreSession(sessionId);
+      const restored = agent.getMessages();
+      const uiMessages: Message[] = [];
+      for (const msg of restored) {
+        if (msg.role === 'user') {
+          const text = typeof msg.content === 'string'
+            ? msg.content
+            : msg.content
+                .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                .map((b) => b.text)
+                .join(' ');
+          uiMessages.push({ type: 'user', content: text });
+        } else if (msg.role === 'assistant') {
+          const text = typeof msg.content === 'string'
+            ? msg.content
+            : msg.content
+                .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+                .map((b) => b.text)
+                .join(' ');
+          if (text) uiMessages.push({ type: 'text', content: text });
+        }
+      }
+      setMessages(uiMessages);
+      setStreamText('');
+      setUsage({ inputTokens: 0, outputTokens: 0 });
+      isFirstMessage.current = false;
+      setShowSessionPicker(false);
+    },
+    [agent],
+  );
+
+  const handleSessionCancel = useCallback(() => {
+    setShowSessionPicker(false);
   }, []);
 
   const handlePermissionAllow = useCallback(() => {
@@ -260,7 +325,7 @@ export function App({ config }: AppProps) {
     if (initialPrompt) handleSubmit(initialPrompt);
   }, []);
 
-  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || pendingPermission !== null;
+  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || showSessionPicker || pendingPermission !== null;
 
   const PERMISSION_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
@@ -286,6 +351,8 @@ export function App({ config }: AppProps) {
 
   const slashCommands: SlashCommand[] = React.useMemo(() => {
     const builtIn: SlashCommand[] = [
+      { name: 'new', description: 'Start a new conversation (reset context)' },
+      { name: 'sessions', description: 'Browse and continue previous sessions' },
       { name: 'model', description: 'Switch model' },
       { name: 'skills', description: 'Manage skills (enable/disable)' },
       { name: 'subagents', description: 'Manage subagents (enable/disable)' },
@@ -350,6 +417,16 @@ export function App({ config }: AppProps) {
             currentModel={agent.getConfig().model}
             onSelect={handleModelSelect}
             onCancel={handleModelCancel}
+          />
+        </Box>
+      )}
+
+      {showSessionPicker && (
+        <Box marginTop={1}>
+          <SessionPicker
+            sessions={listSessions()}
+            onSelect={handleSessionSelect}
+            onCancel={handleSessionCancel}
           />
         </Box>
       )}

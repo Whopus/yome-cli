@@ -12,6 +12,7 @@ import type { YomeConfig, ModelEntry } from './config.js';
 import { modelEntryToConfig } from './config.js';
 import type { AgentLoopCallbacks } from './loops/index.js';
 import type { PastedImage } from './utils/imagePaste.js';
+import { createSessionId, appendMessage, loadSessionMessages, setSessionTitle } from './sessions.js';
 
 export interface AgentCallbacks extends AgentLoopCallbacks {
   onLoopChanged?: (name: string) => void;
@@ -26,6 +27,7 @@ export class Agent {
   private loopRegistry = createLoopRegistry();
   private currentLoopName = 'simple';
   private permissionContext: ToolPermissionContext;
+  private sessionId: string;
 
   constructor(config: YomeConfig) {
     this.config = config;
@@ -34,6 +36,11 @@ export class Agent {
     registerTool(createAgentTool(config));
     this.permissionContext = initializePermissionContext();
     setPermissionContext(this.permissionContext);
+    this.sessionId = createSessionId();
+  }
+
+  getSessionId(): string {
+    return this.sessionId;
   }
 
   getPermissionContext(): ToolPermissionContext {
@@ -51,6 +58,36 @@ export class Agent {
   switchPermissionMode(mode: PermissionMode): void {
     this.permissionContext = { ...this.permissionContext, mode };
     setPermissionContext(this.permissionContext);
+  }
+
+  resetContext(): void {
+    this.messages = [];
+    this.systemPrompt = buildSystemPrompt();
+    this.skills = loadAllSkills();
+    clearAgentCache();
+    registerTool(createAgentTool(this.config));
+    this.sessionId = createSessionId();
+  }
+
+  restoreSession(sessionId: string): void {
+    this.sessionId = sessionId;
+    this.messages = loadSessionMessages(sessionId);
+    this.systemPrompt = buildSystemPrompt();
+    this.skills = loadAllSkills();
+    clearAgentCache();
+    registerTool(createAgentTool(this.config));
+  }
+
+  getMessages(): AgentMessage[] {
+    return this.messages;
+  }
+
+  persistMessage(message: AgentMessage): void {
+    appendMessage(this.sessionId, message);
+  }
+
+  persistTitle(title: string): void {
+    setSessionTitle(this.sessionId, title);
   }
 
   getSkills(): Skill[] {
