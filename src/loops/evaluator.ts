@@ -1,5 +1,5 @@
 import { callLLM, extractText, callLLMStream } from '../llm.js';
-import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks } from './types.js';
+import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
 import type { ContentBlock, AgentMessage } from '../types.js';
 
 const MAX_GENERATOR_ITERATIONS = 20;
@@ -16,7 +16,7 @@ export class EvaluatorAgentLoop implements AgentLoop {
   readonly description = 'Evaluator-optimizer: generate, evaluate, refine loop';
 
   async run(
-    userMessage: string,
+    userMessage: UserInput,
     ctx: AgentLoopContext,
     cb: AgentLoopCallbacks,
   ): Promise<void> {

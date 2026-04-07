@@ -7,10 +7,11 @@ import { initializePermissionContext } from './permissions/loader.js';
 import type { ToolPermissionContext, PermissionMode } from './permissions/types.js';
 import type { Skill } from './skills/index.js';
 import type { AgentDefinition } from './subagent/index.js';
-import type { AgentMessage } from './types.js';
+import type { AgentMessage, ContentBlock, ImageBlock } from './types.js';
 import type { YomeConfig, ModelEntry } from './config.js';
 import { modelEntryToConfig } from './config.js';
 import type { AgentLoopCallbacks } from './loops/index.js';
+import type { PastedImage } from './utils/imagePaste.js';
 
 export interface AgentCallbacks extends AgentLoopCallbacks {
   onLoopChanged?: (name: string) => void;
@@ -93,7 +94,7 @@ export class Agent {
     return { skill, args };
   }
 
-  async run(userMessage: string, callbacks: AgentCallbacks): Promise<void> {
+  async run(userMessage: string, callbacks: AgentCallbacks, images?: PastedImage[]): Promise<void> {
     if (callbacks.onAskPermission) {
       setAskPermissionHandler(callbacks.onAskPermission);
     }
@@ -106,10 +107,23 @@ export class Agent {
       effectiveMessage = `[Skill: /${skill.name}]\n\n${skill.getPrompt(args)}`;
     }
 
+    // Build user input: plain string or content blocks with images
+    let userInput: string | ContentBlock[];
+    if (images && images.length > 0) {
+      const blocks: ContentBlock[] = images.map((img): ImageBlock => ({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+      }));
+      blocks.push({ type: 'text', text: effectiveMessage });
+      userInput = blocks;
+    } else {
+      userInput = effectiveMessage;
+    }
+
     const loop = this.loopRegistry.get(this.currentLoopName) ?? this.loopRegistry.default();
     const tools = getAnthropicTools();
 
-    await loop.run(effectiveMessage, {
+    await loop.run(userInput, {
       config: this.config,
       systemPrompt: this.systemPrompt,
       messages: this.messages,

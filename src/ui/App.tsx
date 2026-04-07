@@ -18,6 +18,9 @@ import type { ToggleItem } from './TogglePicker.js';
 import type { Message } from './MessageList.js';
 import type { YomeConfig } from '../config.js';
 import type { PermissionMode } from '../permissions/types.js';
+import type { PastedImage } from '../utils/imagePaste.js';
+import { getImageFromClipboard } from '../utils/imagePaste.js';
+import type { ImageBlock } from '../types.js';
 
 interface AppProps {
   config: YomeConfig;
@@ -47,11 +50,12 @@ export function App({ config }: AppProps) {
   const [agent] = useState(() => new Agent(config));
   const [loopName, setLoopName] = useState(() => agent.getCurrentLoopName());
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() => agent.getPermissionContext().mode);
+  const [pendingImages, setPendingImages] = useState<PastedImage[]>([]);
   const version = getVersion();
 
   const handleSubmit = useCallback(
     async (text: string) => {
-      if (!text.trim() || isRunning) return;
+      if ((!text.trim() && pendingImages.length === 0) || isRunning) return;
       const prompt = text.trim();
       setInputValue('');
 
@@ -81,13 +85,19 @@ export function App({ config }: AppProps) {
         return;
       }
 
-      setMessages((prev) => [...prev, { type: 'user', content: prompt }]);
+      const images = [...pendingImages];
+      setPendingImages([]);
+
+      const imageLabel = images.length > 0
+        ? ` [${images.length} image${images.length > 1 ? 's' : ''}]`
+        : '';
+      setMessages((prev) => [...prev, { type: 'user', content: (prompt || '(image)') + imageLabel }]);
       setStreamText('');
       setIsRunning(true);
 
       let currentText = '';
 
-      await agent.run(prompt, {
+      await agent.run(prompt || 'What is in this image?', {
         async onAskPermission(toolName, message, input) {
           const detail = toolName === 'Bash'
             ? (input.command as string) ?? ''
@@ -144,9 +154,9 @@ export function App({ config }: AppProps) {
           setMessages((prev) => [...prev, { type: 'error', content: err.message }]);
           setIsRunning(false);
         },
-      });
+      }, images.length > 0 ? images : undefined);
     },
-    [agent, isRunning],
+    [agent, isRunning, pendingImages],
   );
 
   const handleAgentSelect = useCallback(
@@ -254,8 +264,18 @@ export function App({ config }: AppProps) {
 
   const PERMISSION_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
+  const handleImagePaste = useCallback(() => {
+    const image = getImageFromClipboard();
+    if (image) {
+      setPendingImages((prev) => [...prev, image]);
+    }
+  }, []);
+
   useInput((input, key) => {
     if (!isPickerOpen && key.ctrl && input === 'c') exit();
+    if (!isPickerOpen && !isRunning && key.ctrl && input === 'v') {
+      handleImagePaste();
+    }
     if (!isPickerOpen && !isRunning && key.shift && key.tab) {
       const idx = PERMISSION_CYCLE.indexOf(permissionMode);
       const next = PERMISSION_CYCLE[(idx + 1) % PERMISSION_CYCLE.length]!;
@@ -367,6 +387,7 @@ export function App({ config }: AppProps) {
           loopName={loopName}
           slashCommands={slashCommands}
           permissionMode={permissionMode}
+          imageCount={pendingImages.length}
         />
       )}
     </Box>

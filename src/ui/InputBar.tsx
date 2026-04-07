@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { PermissionMode } from '../permissions/types.js';
@@ -16,6 +16,7 @@ interface InputBarProps {
   loopName: string;
   slashCommands?: SlashCommand[];
   permissionMode?: PermissionMode;
+  imageCount?: number;
 }
 
 const MAX_VISIBLE = 5;
@@ -32,8 +33,9 @@ function getPermissionLabel(mode: PermissionMode): { text: string; color: string
   }
 }
 
-export function InputBar({ value, onChange, onSubmit, model, loopName, slashCommands = [], permissionMode = 'default' }: InputBarProps) {
+export function InputBar({ value, onChange, onSubmit, model, loopName, slashCommands = [], permissionMode = 'default', imageCount = 0 }: InputBarProps) {
   const [cursor, setCursor] = useState(0);
+  const suppressNextChange = useRef(false);
 
   const filtered = useMemo(() => {
     if (!value.startsWith('/')) return [];
@@ -48,6 +50,10 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
   }, [filtered.length]);
 
   const handleChange = useCallback((v: string) => {
+    if (suppressNextChange.current) {
+      suppressNextChange.current = false;
+      return;
+    }
     onChange(v);
   }, [onChange]);
 
@@ -61,7 +67,12 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
     }
   }, [showSuggestions, filtered, cursor, onChange, onSubmit]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
+    // Suppress Ctrl+V so ink-text-input doesn't insert 'v'
+    if (key.ctrl && input === 'v') {
+      suppressNextChange.current = true;
+      return;
+    }
     if (!showSuggestions) return;
     if (key.upArrow) {
       setCursor((prev) => (prev > 0 ? prev - 1 : filtered.length - 1));
@@ -100,6 +111,12 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
         <Text color={perm.color}>{perm.text}</Text>
         <Text dimColor>{model || 'qwen-plus'}</Text>
       </Box>
+      {imageCount > 0 && (
+        <Box paddingX={1}>
+          <Text color="green" bold>{`\u{1F4CE} ${imageCount} image${imageCount > 1 ? 's' : ''} attached`}</Text>
+          <Text dimColor> (press Enter to send)</Text>
+        </Box>
+      )}
       <Box borderStyle="round" borderColor="gray" paddingX={1}>
         <Text color="yellow">{`> `}</Text>
         <TextInput

@@ -1,5 +1,6 @@
 import { callLLMStream, callLLM, extractText } from '../llm.js';
-import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks } from './types.js';
+import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
+import { userInputAsText } from './types.js';
 import type { ContentBlock } from '../types.js';
 
 const MAX_ITERATIONS = 30;
@@ -18,7 +19,7 @@ export class ChainAgentLoop implements AgentLoop {
   readonly description = 'Prompt chaining: plan then execute steps sequentially with gates';
 
   async run(
-    userMessage: string,
+    userMessage: UserInput,
     ctx: AgentLoopContext,
     cb: AgentLoopCallbacks,
   ): Promise<void> {
@@ -46,10 +47,10 @@ export class ChainAgentLoop implements AgentLoop {
       let steps: string[];
       try {
         const match = planText.match(/\[[\s\S]*\]/);
-        steps = match ? JSON.parse(match[0]) : [userMessage];
+        steps = match ? JSON.parse(match[0]) : [userInputAsText(userMessage)];
       } catch {
         // If LLM doesn't produce valid JSON, fall through to simple mode
-        steps = [userMessage];
+        steps = [userInputAsText(userMessage)];
       }
 
       cb.onTextDelta(`**Plan** (${steps.length} steps)\n`);

@@ -17,10 +17,20 @@ export interface AgentLoopContext {
   executeTool: (name: string, input: Record<string, unknown>) => Promise<string>;
 }
 
+export type UserInput = string | ContentBlock[];
+
+export function userInputAsText(input: UserInput): string {
+  if (typeof input === 'string') return input;
+  return input
+    .filter((b): b is ContentBlock & { type: 'text' } => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n');
+}
+
 export interface AgentLoop {
   readonly name: string;
   readonly description: string;
-  run(userMessage: string, context: AgentLoopContext, callbacks: AgentLoopCallbacks): Promise<void>;
+  run(userMessage: UserInput, context: AgentLoopContext, callbacks: AgentLoopCallbacks): Promise<void>;
 }
 
 export interface AgentLoopRegistry {

@@ -5,6 +5,15 @@ export interface TextBlock {
   text: string;
 }
 
+export interface ImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
 export interface ToolUseBlock {
   type: 'tool_use';
   id: string;
@@ -18,7 +27,7 @@ export interface ToolResultBlock {
   content: string;
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+export type ContentBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock;
 
 // ── Messages ──
 

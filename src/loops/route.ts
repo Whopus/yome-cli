@@ -1,5 +1,5 @@
 import { callLLM, extractText, callLLMStream } from '../llm.js';
-import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks } from './types.js';
+import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
 import type { ContentBlock } from '../types.js';
 
 const MAX_ITERATIONS = 30;
@@ -53,7 +53,7 @@ export class RouteAgentLoop implements AgentLoop {
   readonly description = 'Routing: classify input then dispatch to specialized handler';
 
   async run(
-    userMessage: string,
+    userMessage: UserInput,
     ctx: AgentLoopContext,
     cb: AgentLoopCallbacks,
   ): Promise<void> {

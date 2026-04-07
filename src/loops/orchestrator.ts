@@ -1,5 +1,6 @@
 import { callLLM, extractText, callLLMStream } from '../llm.js';
-import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks } from './types.js';
+import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
+import { userInputAsText } from './types.js';
 import type { ContentBlock, AgentMessage } from '../types.js';
 
 const MAX_WORKER_ITERATIONS = 15;
@@ -15,7 +16,7 @@ export class OrchestratorAgentLoop implements AgentLoop {
   readonly description = 'Orchestrator-workers: decompose, delegate in parallel, synthesize';
 
   async run(
-    userMessage: string,
+    userMessage: UserInput,
     ctx: AgentLoopContext,
     cb: AgentLoopCallbacks,
   ): Promise<void> {
@@ -43,9 +44,9 @@ export class OrchestratorAgentLoop implements AgentLoop {
       let subtasks: { id: number; task: string }[];
       try {
         const match = decomposeText.match(/\[[\s\S]*\]/);
-        subtasks = match ? JSON.parse(match[0]) : [{ id: 1, task: userMessage }];
+        subtasks = match ? JSON.parse(match[0]) : [{ id: 1, task: userInputAsText(userMessage) }];
       } catch {
-        subtasks = [{ id: 1, task: userMessage }];
+        subtasks = [{ id: 1, task: userInputAsText(userMessage) }];
       }
 
       cb.onTextDelta(`**Orchestrator** dispatching ${subtasks.length} workers:\n`);

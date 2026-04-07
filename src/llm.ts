@@ -87,7 +87,23 @@ function toOpenAIMessages(systemPrompt: string, messages: AgentMessage[]): unkno
         }
       } else {
         const textParts = msg.content.filter((b) => b.type === 'text').map((b) => (b as any).text);
-        result.push({ role: 'user', content: textParts.join('\n') || '' });
+        const imageParts = msg.content.filter((b) => b.type === 'image');
+        if (imageParts.length > 0) {
+          const parts: unknown[] = [];
+          for (const img of imageParts) {
+            const src = (img as any).source;
+            parts.push({
+              type: 'image_url',
+              image_url: { url: `data:${src.media_type};base64,${src.data}` },
+            });
+          }
+          if (textParts.length > 0) {
+            parts.push({ type: 'text', text: textParts.join('\n') });
+          }
+          result.push({ role: 'user', content: parts });
+        } else {
+          result.push({ role: 'user', content: textParts.join('\n') || '' });
+        }
       }
     }
   }

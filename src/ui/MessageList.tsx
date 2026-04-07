@@ -112,7 +112,7 @@ export function MessageList({ messages, streamText, isRunning }: MessageListProp
       {isRunning && !streamText && (
         <Box marginTop={1} marginLeft={2}>
           <Spinner />
-          <Text dimColor> Thinking\u2026</Text>
+          <Text dimColor>{' Thinking\u2026'}</Text>
         </Box>
       )}
     </>
