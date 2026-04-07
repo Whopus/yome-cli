@@ -1,8 +1,10 @@
 import { buildSystemPrompt } from './context.js';
-import { getAnthropicTools, executeTool } from './tools/index.js';
+import { getAnthropicTools, executeTool, registerTool } from './tools/index.js';
 import { loadAllSkills } from './skills/index.js';
 import { createLoopRegistry } from './loops/index.js';
+import { createAgentTool, clearAgentCache, getAllAgents } from './subagent/index.js';
 import type { Skill } from './skills/index.js';
+import type { AgentDefinition } from './subagent/index.js';
 import type { AgentMessage } from './types.js';
 import type { YomeConfig } from './config.js';
 import type { AgentLoopCallbacks } from './loops/index.js';
@@ -23,15 +25,22 @@ export class Agent {
     this.config = config;
     this.systemPrompt = buildSystemPrompt();
     this.skills = loadAllSkills();
+    registerTool(createAgentTool(config));
   }
 
   getSkills(): Skill[] {
-    return this.skills;
+    return loadAllSkills(true);
+  }
+
+  getAgents(): AgentDefinition[] {
+    return getAllAgents();
   }
 
   reloadSkills(): void {
     this.skills = loadAllSkills();
     this.systemPrompt = buildSystemPrompt();
+    clearAgentCache();
+    registerTool(createAgentTool(this.config));
   }
 
   getCurrentLoopName(): string {

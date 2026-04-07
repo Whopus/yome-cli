@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
+import { isSkillDisabled } from '../toggleState.js';
 import type { Skill, SkillFrontmatter } from './types.js';
 
 function parseFrontmatter(raw: string): { frontmatter: SkillFrontmatter; content: string } {
@@ -120,7 +121,7 @@ export function getProjectSkillsDir(): string {
   return join(process.cwd(), '.yome', 'skills');
 }
 
-export function loadAllSkills(): Skill[] {
+export function loadAllSkills(includeDisabled = false): Skill[] {
   const userSkills = loadSkillsFromDir(getUserSkillsDir(), 'user');
   const projectSkills = loadSkillsFromDir(getProjectSkillsDir(), 'project');
 
@@ -129,5 +130,7 @@ export function loadAllSkills(): Skill[] {
   for (const s of userSkills) byName.set(s.name, s);
   for (const s of projectSkills) byName.set(s.name, s);
 
-  return Array.from(byName.values());
+  const all = Array.from(byName.values());
+  if (includeDisabled) return all;
+  return all.filter((s) => !isSkillDisabled(s.name));
 }

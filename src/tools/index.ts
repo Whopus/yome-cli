@@ -9,7 +9,7 @@ import { lsTool } from './ls.js';
 
 const DEFAULT_MAX_RESULT_CHARS = 20_000;
 
-export const ALL_TOOLS: ToolDef[] = [
+export const BASE_TOOLS: ToolDef[] = [
   readTool,
   editTool,
   writeTool,
@@ -20,14 +20,22 @@ export const ALL_TOOLS: ToolDef[] = [
 ];
 
 const toolMap = new Map<string, ToolDef>();
-for (const t of ALL_TOOLS) toolMap.set(t.name, t);
+for (const t of BASE_TOOLS) toolMap.set(t.name, t);
+
+export function registerTool(tool: ToolDef): void {
+  toolMap.set(tool.name, tool);
+}
 
 export function getToolByName(name: string): ToolDef | undefined {
   return toolMap.get(name);
 }
 
+export function getAllTools(): ToolDef[] {
+  return Array.from(toolMap.values());
+}
+
 export function getAnthropicTools(): AnthropicTool[] {
-  return ALL_TOOLS.map((t) => ({
+  return getAllTools().map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.inputSchema,

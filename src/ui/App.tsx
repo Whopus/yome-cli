@@ -2,10 +2,14 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Agent } from '../agent.js';
 import { getVersion } from '../config.js';
+import { isSkillDisabled, isAgentDisabled, toggleSkill, toggleAgent } from '../toggleState.js';
 import { MessageList, getToolLabel, getToolDetail } from './MessageList.js';
 import { InputBar } from './InputBar.js';
+import type { SlashCommand } from './InputBar.js';
 import { Banner } from './Banner.js';
 import { AgentPicker } from './AgentPicker.js';
+import { TogglePicker } from './TogglePicker.js';
+import type { ToggleItem } from './TogglePicker.js';
 import type { Message } from './MessageList.js';
 import type { YomeConfig } from '../config.js';
 
@@ -20,6 +24,9 @@ export function App({ config }: AppProps) {
   const [inputValue, setInputValue] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [showSkillsPicker, setShowSkillsPicker] = useState(false);
+  const [showAgentsPicker, setShowAgentsPicker] = useState(false);
+  const [pickerVersion, setPickerVersion] = useState(0);
   const [usage, setUsage] = useState({ inputTokens: 0, outputTokens: 0 });
   const [agent] = useState(() => new Agent(config));
   const [loopName, setLoopName] = useState(() => agent.getCurrentLoopName());
@@ -31,13 +38,17 @@ export function App({ config }: AppProps) {
       const prompt = text.trim();
       setInputValue('');
 
-      // /skills
+      // /skills — interactive toggle picker
       if (prompt === '/skills') {
-        const skills = agent.getSkills();
-        const content = skills.length === 0
-          ? 'No skills loaded.\n\nCreate skills in:\n- `~/.yome/skills/<name>/SKILL.md` (user)\n- `.yome/skills/<name>/SKILL.md` (project)'
-          : `**Available Skills** (${skills.length})\n\n${skills.map((s) => `- **/${s.name}** -- ${s.description} _(${s.source})_`).join('\n')}`;
-        setMessages((prev) => [...prev, { type: 'user', content: prompt }, { type: 'text', content }]);
+        setShowSkillsPicker(true);
+        setPickerVersion((v) => v + 1);
+        return;
+      }
+
+      // /subagents — interactive toggle picker
+      if (prompt === '/subagents') {
+        setShowAgentsPicker(true);
+        setPickerVersion((v) => v + 1);
         return;
       }
 
@@ -124,14 +135,61 @@ export function App({ config }: AppProps) {
     setShowAgentPicker(false);
   }, []);
 
+  const buildSkillItems = useCallback((): ToggleItem[] => {
+    return agent.getSkills().map((s) => ({
+      name: s.name,
+      description: s.description,
+      source: s.source,
+      enabled: !isSkillDisabled(s.name),
+    }));
+  }, [agent]);
+
+  const buildAgentItems = useCallback((): ToggleItem[] => {
+    return agent.getAgents().map((a) => ({
+      name: a.agentType,
+      description: a.whenToUse,
+      source: a.source,
+      enabled: !isAgentDisabled(a.agentType),
+      skills: a.skills,
+    }));
+  }, [agent]);
+
+  const handleSkillToggle = useCallback((name: string) => {
+    const nowEnabled = toggleSkill(name);
+    setPickerVersion((v) => v + 1);
+    const status = nowEnabled ? 'enabled' : 'disabled';
+    setMessages((prev) => [...prev, { type: 'text', content: `Skill **${name}** ${status}.` }]);
+  }, []);
+
+  const handleAgentToggle = useCallback((name: string) => {
+    const nowEnabled = toggleAgent(name);
+    setPickerVersion((v) => v + 1);
+    const status = nowEnabled ? 'enabled' : 'disabled';
+    setMessages((prev) => [...prev, { type: 'text', content: `Agent **${name}** ${status}.` }]);
+  }, []);
+
   useEffect(() => {
     const initialPrompt = (config as any).__initialPrompt;
     if (initialPrompt) handleSubmit(initialPrompt);
   }, []);
 
+  const isPickerOpen = showAgentPicker || showSkillsPicker || showAgentsPicker;
+
   useInput((input, key) => {
-    if (!showAgentPicker && key.ctrl && input === 'c') exit();
+    if (!isPickerOpen && key.ctrl && input === 'c') exit();
   });
+
+  const slashCommands: SlashCommand[] = React.useMemo(() => {
+    const builtIn: SlashCommand[] = [
+      { name: 'skills', description: 'Manage skills (enable/disable)' },
+      { name: 'subagents', description: 'Manage subagents (enable/disable)' },
+      { name: 'agent', description: 'Switch agent loop mode' },
+    ];
+    const skillItems = agent.getSkills()
+      .filter((s) => !isSkillDisabled(s.name))
+      .map((s) => ({ name: s.name, description: s.description }));
+    return [...builtIn, ...skillItems];
+  }, [agent, pickerVersion]);
 
   const totalTokens = usage.inputTokens + usage.outputTokens;
 
@@ -166,13 +224,40 @@ export function App({ config }: AppProps) {
         </Box>
       )}
 
-      {!isRunning && !showAgentPicker && (
+      {showSkillsPicker && (
+        <Box marginTop={1}>
+          <TogglePicker
+            key={`skills-${pickerVersion}`}
+            title="Skills"
+            items={buildSkillItems()}
+            onToggle={handleSkillToggle}
+            onClose={() => setShowSkillsPicker(false)}
+            emptyHint={'No skills found.\n\nCreate skills in:\n  ~/.yome/skills/<name>/SKILL.md  (user)\n  .yome/skills/<name>/SKILL.md   (project)'}
+          />
+        </Box>
+      )}
+
+      {showAgentsPicker && (
+        <Box marginTop={1}>
+          <TogglePicker
+            key={`agents-${pickerVersion}`}
+            title="Agents"
+            items={buildAgentItems()}
+            onToggle={handleAgentToggle}
+            onClose={() => setShowAgentsPicker(false)}
+            emptyHint={'No agents found.\n\nCreate agents in:\n  ~/.yome/agents/<name>.md  (user)\n  .yome/agents/<name>.md   (project)'}
+          />
+        </Box>
+      )}
+
+      {!isRunning && !isPickerOpen && (
         <InputBar
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSubmit}
           model={config.model}
           loopName={loopName}
+          slashCommands={slashCommands}
         />
       )}
     </Box>
