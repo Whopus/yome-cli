@@ -73,6 +73,16 @@ export function App({ config }: AppProps) {
         return;
       }
 
+      // /login — mock login command
+      if (prompt === '/login') {
+        setMessages((prev) => [...prev, { type: 'text', content: '🔒 Login requested. This is a mock implementation.' }]);
+        setMessages((prev) => [...prev, { type: 'text', content: 'Enter your credentials (mock):' }]);
+        setMessages((prev) => [...prev, { type: 'text', content: '• Username: `user@example.com`' }]);
+        setMessages((prev) => [...prev, { type: 'text', content: '• Password: `••••••••`' }]);
+        setMessages((prev) => [...prev, { type: 'text', content: '✅ Login successful! You are now authenticated.' }]);
+        return;
+      }
+
       // /sessions — open session picker
       if (prompt === '/sessions') {
         setShowSessionPicker(true);
@@ -352,6 +362,7 @@ export function App({ config }: AppProps) {
   const slashCommands: SlashCommand[] = React.useMemo(() => {
     const builtIn: SlashCommand[] = [
       { name: 'new', description: 'Start a new conversation (reset context)' },
+      { name: 'login', description: 'Mock login command (for demonstration)' },
       { name: 'sessions', description: 'Browse and continue previous sessions' },
       { name: 'model', description: 'Switch model' },
       { name: 'skills', description: 'Manage skills (enable/disable)' },

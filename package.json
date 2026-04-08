@@ -1,6 +1,6 @@
 {
   "name": "@sobers/yome",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Yome CLI — AI coding agent",
   "type": "module",
   "bin": {
