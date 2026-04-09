@@ -1,6 +1,12 @@
 import { readdir, stat } from 'fs/promises';
 import { resolve, join } from 'path';
-import type { ToolDef } from '../types.js';
+import type { ToolDef } from '../../types.js';
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
+}
 
 export const lsTool: ToolDef = {
   name: 'LS',
@@ -39,9 +45,3 @@ export const lsTool: ToolDef = {
     }
   },
 };
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}M`;
-}
