@@ -1,6 +1,9 @@
-import { readFile, stat } from 'fs/promises';
+import { stat } from 'fs/promises';
 import { resolve } from 'path';
-import type { ToolDef } from '../types.js';
+import type { ToolDef } from '../../types.js';
+import { getReadToolDescription, MAX_LINES_TO_READ, READ_TOOL_NAME } from './prompt.js';
+import { readFileInRange } from '../shared/fileText.js';
+import { setReadSnapshot } from '../shared/fileState.js';
 
 function addLineNumbers(content: string, startLine: number): string {
   return content
@@ -10,14 +13,14 @@ function addLineNumbers(content: string, startLine: number): string {
 }
 
 export const readTool: ToolDef = {
-  name: 'Read',
-  description: 'Read the contents of a file. Supports offset and limit for large files.',
+  name: READ_TOOL_NAME,
+  description: getReadToolDescription(),
   inputSchema: {
     type: 'object',
     properties: {
       file_path: { type: 'string', description: 'Absolute path to the file to read' },
-      offset: { type: 'number', description: 'Line number to start reading from (1-based). Default: 1' },
-      limit: { type: 'number', description: 'Maximum number of lines to read. Default: 2000' },
+      offset: { type: 'number', description: 'Line number to start reading from (1-based)' },
+      limit: { type: 'number', description: 'Maximum number of lines to read' },
     },
     required: ['file_path'],
   },
@@ -32,7 +35,7 @@ export const readTool: ToolDef = {
   async execute(input) {
     const filePath = resolve(input.file_path as string);
     const offset = Math.max(1, (input.offset as number) || 1);
-    const limit = (input.limit as number) || 2000;
+    const limit = (input.limit as number) || MAX_LINES_TO_READ;
 
     try {
       await stat(filePath);
@@ -40,13 +43,20 @@ export const readTool: ToolDef = {
       return `Error: File not found: ${filePath}`;
     }
 
-    const raw = await readFile(filePath, 'utf-8');
-    const lines = raw.split('\n');
-    const totalLines = lines.length;
     const startIdx = offset - 1;
-    const slice = lines.slice(startIdx, startIdx + limit);
+    const range = await readFileInRange(filePath, startIdx, limit);
+    const totalLines = range.totalLines;
+    const isPartialView = offset !== 1 || range.lineCount < totalLines;
 
-    const numbered = addLineNumbers(slice.join('\n'), offset);
+    setReadSnapshot(filePath, {
+      content: range.content,
+      timestamp: range.mtimeMs,
+      offset: isPartialView ? offset : undefined,
+      limit: isPartialView ? limit : undefined,
+      isPartialView,
+    });
+
+    const numbered = addLineNumbers(range.content, offset);
     let result = numbered;
 
     if (startIdx + limit < totalLines) {

@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { resolve } from 'path';
-import type { ToolDef } from '../types.js';
+import type { ToolDef } from '../../types.js';
 
 function runGrep(args: string[], cwd: string): Promise<string> {
   return new Promise((resolveP) => {
@@ -67,7 +67,6 @@ export const grepTool: ToolDef = {
     const caseInsensitive = input.case_insensitive as boolean;
     const globFilter = input.glob as string;
 
-    // Use array args (no shell interpolation = no injection)
     const useRg = await hasRipgrep();
 
     let args: string[];

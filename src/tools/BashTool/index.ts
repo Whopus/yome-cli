@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
-import type { ToolDef } from '../types.js';
-import type { PermissionResult, ToolPermissionContext } from '../permissions/types.js';
-import { isContentAllowed, isContentDenied } from '../permissions/checker.js';
+import type { ToolDef } from '../../types.js';
+import type { PermissionResult, ToolPermissionContext } from '../../permissions/types.js';
+import { isContentAllowed, isContentDenied } from '../../permissions/checker.js';
 
 const MAX_OUTPUT = 20_000;
 

@@ -1,6 +1,6 @@
 import fg from 'fast-glob';
 import { resolve } from 'path';
-import type { ToolDef } from '../types.js';
+import type { ToolDef } from '../../types.js';
 
 export const globTool: ToolDef = {
   name: 'Glob',

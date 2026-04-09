@@ -1,13 +1,13 @@
 import type { ToolDef, AnthropicTool } from '../types.js';
 import type { ToolPermissionContext, PermissionDecision } from '../permissions/types.js';
 import { checkPermission } from '../permissions/checker.js';
-import { readTool } from './read.js';
-import { editTool } from './edit.js';
-import { writeTool } from './write.js';
-import { bashTool } from './bash.js';
-import { globTool } from './glob.js';
-import { grepTool } from './grep.js';
-import { lsTool } from './ls.js';
+import { readTool } from './ReadTool/index.js';
+import { editTool } from './EditTool/index.js';
+import { writeTool } from './WriteTool/index.js';
+import { bashTool } from './BashTool/index.js';
+import { globTool } from './GlobTool/index.js';
+import { grepTool } from './GrepTool/index.js';
+import { lsTool } from './LSTool/index.js';
 
 const DEFAULT_MAX_RESULT_CHARS = 20_000;
 
