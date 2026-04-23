@@ -1,5 +1,5 @@
 {
-  "name": "@sobers/yome",
+  "name": "@poping/yome",
   "version": "0.0.2",
   "description": "Yome CLI — AI coding agent",
   "type": "module",

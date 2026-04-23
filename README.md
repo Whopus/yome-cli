@@ -5,13 +5,13 @@ AI coding agent in your terminal.
 ## Install
 
 ```bash
-npm install -g @sobers/yome
+npm install -g @poping/yome
 ```
 
 Or run directly with npx:
 
 ```bash
-npx @sobers/yome
+npx @poping/yome
 ```
 
 ## Configuration
