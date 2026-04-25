@@ -12,6 +12,49 @@ type StreamCallback = (event: {
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 3000, 8000];
 
+// ── Context window management ───────────────────────────────────────
+//
+// As a session grows the message history is sent in full on every
+// turn, blowing up upload bandwidth, latency, AND server-side context
+// limits. Before serializing we trim middle messages, keeping:
+//   - the first user turn (anchors the task)
+//   - the most recent N turns (active context)
+// Tool-use ↔ tool-result pairs are kept atomic so we never break the
+// API contract that every tool_use needs its matching tool_result.
+const MAX_KEEP_TAIL = 30;
+
+function trimMessageHistory(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length <= MAX_KEEP_TAIL + 2) return messages;
+
+  // Walk backward keeping at least MAX_KEEP_TAIL messages, but extend
+  // the keep range if the cut would slice through a tool_use/tool_result
+  // pair (assistant message with tool_use blocks → user message with
+  // tool_result blocks should both stay or both go).
+  let keepFrom = messages.length - MAX_KEEP_TAIL;
+  // Pull back until we land on a clean boundary: a user text message
+  // (not a tool_result wrapper) or the very start.
+  while (keepFrom > 1) {
+    const m = messages[keepFrom];
+    const isToolResultMsg =
+      m && m.role === 'user' && Array.isArray(m.content) &&
+      m.content.some((b) => b.type === 'tool_result');
+    if (!isToolResultMsg) break;
+    keepFrom--;
+  }
+  if (keepFrom <= 1) return messages;
+
+  // Always keep messages[0] (first user prompt) so the model has the
+  // anchor task description.
+  const head = messages[0]!;
+  const tail = messages.slice(keepFrom);
+  const droppedCount = keepFrom - 1;
+  const elision: AgentMessage = {
+    role: 'user',
+    content: `[… ${droppedCount} earlier messages elided to fit the context window …]`,
+  };
+  return [head, elision, ...tail];
+}
+
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
@@ -119,11 +162,12 @@ async function callOpenAIStream(
   tools: AnthropicTool[],
   onEvent: StreamCallback,
 ): Promise<AnthropicResponse> {
+  const trimmed = trimMessageHistory(messages);
   const body: Record<string, unknown> = {
     model: config.model ?? 'qwen-plus',
     max_tokens: 8192,
     stream: true,
-    messages: toOpenAIMessages(systemPrompt, messages),
+    messages: toOpenAIMessages(systemPrompt, trimmed),
   };
   if (tools.length > 0) body.tools = toOpenAITools(tools);
 
@@ -218,12 +262,13 @@ async function callAnthropicNativeStream(
   tools: AnthropicTool[],
   onEvent: StreamCallback,
 ): Promise<AnthropicResponse> {
+  const trimmed = trimMessageHistory(messages);
   const body: Record<string, unknown> = {
     model: config.model ?? 'anthropic/claude-sonnet-4-20250514',
     max_tokens: 8192,
     stream: true,
     system: systemPrompt,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: trimmed.map((m) => ({ role: m.role, content: m.content })),
   };
   if (tools.length > 0) body.tools = tools;
 

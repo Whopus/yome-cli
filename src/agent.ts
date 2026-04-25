@@ -1,10 +1,10 @@
 import { buildSystemPrompt } from './context.js';
-import { getAnthropicTools, executeTool, registerTool, setPermissionContext, setAskPermissionHandler, getPermissionContext } from './tools/index.js';
+import { getAnthropicTools, executeTool, registerTool, setPermissionContext, setAskPermissionHandler, getPermissionContext, type AskPermissionResult } from './tools/index.js';
 import { loadAllSkills } from './skills/index.js';
 import { createLoopRegistry } from './loops/index.js';
 import { createAgentTool, clearAgentCache, getAllAgents } from './subagent/index.js';
-import { initializePermissionContext } from './permissions/loader.js';
-import type { ToolPermissionContext, PermissionMode } from './permissions/types.js';
+import { initializePermissionContext, addRuleToContext } from './permissions/loader.js';
+import type { ToolPermissionContext, PermissionMode, PermissionBehavior, PermissionRuleSource } from './permissions/types.js';
 import type { Skill } from './skills/index.js';
 import type { AgentDefinition } from './subagent/index.js';
 import type { AgentMessage, ContentBlock, ImageBlock } from './types.js';
@@ -16,7 +16,7 @@ import { createSessionId, appendMessage, loadSessionMessages, setSessionTitle } 
 
 export interface AgentCallbacks extends AgentLoopCallbacks {
   onLoopChanged?: (name: string) => void;
-  onAskPermission?: (toolName: string, message: string, input: Record<string, unknown>) => Promise<boolean>;
+  onAskPermission?: (toolName: string, message: string, input: Record<string, unknown>) => Promise<AskPermissionResult>;
 }
 
 export class Agent {
@@ -24,6 +24,15 @@ export class Agent {
   private messages: AgentMessage[] = [];
   private systemPrompt: string;
   private skills: Skill[] = [];
+  /**
+   * Cached skill list with includeDisabled=true. We re-read SKILL.md files
+   * only when explicitly invalidated (resetContext / reloadSkills /
+   * skill toggle picker reopens). Previously every call to getSkills() hit
+   * the filesystem — and it gets called on every render of the slash menu,
+   * the unified picker, and the system prompt rebuild. After ~50 turns
+   * that adds up to thousands of redundant readdirSync calls.
+   */
+  private cachedSkillsAll: Skill[] | null = null;
   private loopRegistry = createLoopRegistry();
   private currentLoopName = 'simple';
   private permissionContext: ToolPermissionContext;
@@ -37,6 +46,11 @@ export class Agent {
     this.permissionContext = initializePermissionContext();
     setPermissionContext(this.permissionContext);
     this.sessionId = createSessionId();
+  }
+
+  /** Drop the cached skill list so the next getSkills() call re-reads from disk. */
+  invalidateSkillsCache(): void {
+    this.cachedSkillsAll = null;
   }
 
   getSessionId(): string {
@@ -60,10 +74,29 @@ export class Agent {
     setPermissionContext(this.permissionContext);
   }
 
+  /**
+   * Append a rule to the live in-memory permission context AND update the
+   * tools subsystem so subsequent invocations see it without restarting.
+   *
+   * `source: 'session'` — never persisted, lives only for this Agent instance.
+   * `source: 'userSettings'` — caller is responsible for also writing to disk
+   *   (via `addPermissionRuleToUserSettings`); this just mirrors the rule into
+   *   memory so the current session benefits immediately.
+   */
+  addPermissionRule(
+    ruleString: string,
+    behavior: PermissionBehavior,
+    source: PermissionRuleSource = 'session',
+  ): void {
+    this.permissionContext = addRuleToContext(this.permissionContext, ruleString, behavior, source);
+    setPermissionContext(this.permissionContext);
+  }
+
   resetContext(): void {
     this.messages = [];
     this.systemPrompt = buildSystemPrompt();
     this.skills = loadAllSkills();
+    this.cachedSkillsAll = null;
     clearAgentCache();
     registerTool(createAgentTool(this.config));
     this.sessionId = createSessionId();
@@ -74,6 +107,7 @@ export class Agent {
     this.messages = loadSessionMessages(sessionId);
     this.systemPrompt = buildSystemPrompt();
     this.skills = loadAllSkills();
+    this.cachedSkillsAll = null;
     clearAgentCache();
     registerTool(createAgentTool(this.config));
   }
@@ -91,7 +125,10 @@ export class Agent {
   }
 
   getSkills(): Skill[] {
-    return loadAllSkills(true);
+    if (!this.cachedSkillsAll) {
+      this.cachedSkillsAll = loadAllSkills(true);
+    }
+    return this.cachedSkillsAll;
   }
 
   getAgents(): AgentDefinition[] {
@@ -100,6 +137,7 @@ export class Agent {
 
   reloadSkills(): void {
     this.skills = loadAllSkills();
+    this.cachedSkillsAll = null;
     this.systemPrompt = buildSystemPrompt();
     clearAgentCache();
     registerTool(createAgentTool(this.config));

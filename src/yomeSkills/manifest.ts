@@ -22,6 +22,30 @@ export interface SkillManifest {
   official?: boolean;
   homepage?: string;
   repo?: string;
+  /**
+   * Structured L1 documentation — what the LLM sees in its system prompt
+   * for this skill. Three short fields, each one-line, each answers one
+   * specific question the model has when deciding whether to invoke:
+   *
+   *   when    — "user wants to ..."  (the trigger condition)
+   *   entry   — first command to discover the rest (typically `<domain> --help`)
+   *   effects — truthful side-effects so the model can warn / batch correctly
+   *
+   * Renderer (cli/src/context.ts → buildHubSkillsSection) emits a 3-row
+   * pipe-aligned block; if l1 is absent we fall back to `prompt_line`,
+   * then to `<domain> — <description>`.
+   */
+  l1?: {
+    when?: string;
+    entry?: string;
+    effects?: string;
+  };
+
+  /**
+   * Legacy single-line "elevator pitch". Used only as a fallback when
+   * `l1` is not provided. New skills should prefer `l1`.
+   */
+  prompt_line?: string;
   platforms?: string[];
   delivery?: Record<string, unknown>;
   capabilities?: string[];

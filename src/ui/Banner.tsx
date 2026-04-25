@@ -10,7 +10,10 @@ const LOGO = `
    \u2588\u2588      \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588   \u2588\u2588      \u2588\u2588   \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588
 `.trim();
 
-export function Banner() {
+// Memoized — props are () so the banner only renders once per mount.
+// Keeping it always-on-screen is intentional (per UX spec), and memo
+// prevents it from re-diffing on every token in a streaming response.
+export const Banner = React.memo(function Banner() {
   return (
     <Box flexDirection="column" alignItems="center" marginTop={1} marginBottom={1}>
       <Box flexDirection="column">
@@ -23,4 +26,4 @@ export function Banner() {
       </Box>
     </Box>
   );
-}
+});

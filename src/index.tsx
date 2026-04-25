@@ -56,6 +56,7 @@ const cli = meow(
 `,
   {
     importMeta: import.meta,
+    allowUnknownFlags: true,
     flags: {
       key: { type: 'string', shortFlag: 'k' },
       baseUrl: { type: 'string', shortFlag: 'b' },
@@ -111,6 +112,65 @@ if (cli.input[0] === 'thread') {
   process.exit(exit);
 }
 
+if (cli.input[0] === 'doctor') {
+  const { runDoctor } = await import('./yomeSkills/doctor.js');
+  const report = runDoctor();
+  if (cli.flags.json) {
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    process.exit(report.ok ? 0 : 1);
+  }
+  if (report.issues.length > 0) {
+    console.log(`\n⚠️  Doctor found ${report.issues.filter((i) => i.level === 'error').length} error(s) and ${report.issues.filter((i) => i.level === 'warning').length} warning(s):`);
+    for (const issue of report.issues) {
+      const prefix = issue.level === 'error' ? '❌ ERROR' : '⚠️  WARNING';
+      const slug = issue.slug ? ` [${issue.slug}]` : '';
+      const path = issue.path ? `\n     at ${issue.path}` : '';
+      console.log(`  ${prefix}${slug}: ${issue.message}${path}`);
+    }
+    console.log(`\n💡 Run 'yome skill list' or inspect ~/.yome/skills/ manually.`);
+  } else {
+    console.log(`✅ Doctor passed: ${report.scanned} skills scanned, no issues found.`);
+  }
+  process.exit(report.ok ? 0 : 1);
+}
+
+// `yome <domain> [action] [args...]` — direct skill invocation through
+// the agentic kernel. Same code path the LLM's Bash tool uses, so
+// `yome ppt new ~/x.pptx` (terminal) and `Bash({"command":"ppt new ~/x.pptx"})`
+// (LLM) end up running identical logic — including --help rendering and
+// capability checks.
+//
+// We rebuild the original argv as a single command line and feed it to
+// tryKernel(). meow has already split flags out of cli.input, so we have
+// to splice them back in to reconstruct the user's intent.
+//
+// Routes BEFORE the API-key check because skill calls don't need an LLM key.
+const RESERVED_TOP_LEVEL_DOMAINS = new Set([
+  'skill', 'login', 'logout', 'whoami', 'doctor', 'thread',
+]);
+if (
+  cli.input.length >= 1 &&
+  !RESERVED_TOP_LEVEL_DOMAINS.has(cli.input[0]!) &&
+  /^[a-z][a-z0-9_-]*$/.test(cli.input[0]!)
+) {
+  const { tryKernel } = await import('./skills/runner/kernel.js');
+  // Reconstruct the original command line. process.argv[2..] is the
+  // simplest source — meow can drop trailing positionals + reorder flags,
+  // but argv preserves the user's exact tokens.
+  const raw = process.argv.slice(2).filter((a) => {
+    // Drop CLI-global flags so they don't leak into the skill call.
+    return !/^--?(key|base-url|baseUrl|model|provider|force|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify)(=|$)/.test(a);
+  });
+  const commandLine = raw.map((a) => /\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
+  const k = await tryKernel(commandLine);
+  if (k.handled) {
+    if (k.stdout) process.stdout.write(k.stdout + (k.stdout.endsWith('\n') ? '' : '\n'));
+    if (k.stderr) process.stderr.write(k.stderr + (k.stderr.endsWith('\n') ? '' : '\n'));
+    process.exit(k.exitCode);
+  }
+  // Not a known skill domain — fall through to the agent (or error).
+}
+
 // Persist config flags
 if (cli.flags.key || cli.flags.baseUrl || cli.flags.provider) {
   const updates: Record<string, string> = {};
@@ -132,11 +192,14 @@ if (!config.apiKey) {
   process.exit(1);
 }
 
-const initialPrompt = cli.input.join(' ') || undefined;
-
-// Pass initial prompt through config (avoids extra prop drilling)
-const appConfig = initialPrompt
-  ? Object.assign({}, config, { __initialPrompt: initialPrompt })
-  : config;
-
-render(<App config={appConfig} />);
+// Only enter interactive mode if no recognized subcommand was provided
+if (
+  cli.input.length === 0 ||
+  !['skill', 'login', 'logout', 'whoami', 'doctor', 'thread'].includes(cli.input[0])
+) {
+  const initialPrompt = cli.input.join(' ') || undefined;
+  const appConfig = initialPrompt
+    ? Object.assign({}, config, { __initialPrompt: initialPrompt })
+    : config;
+  render(<App config={appConfig} />);
+}

@@ -64,6 +64,17 @@ function DiffView({ result }: { result: string }) {
 }
 
 export function ToolResult({ name, result }: ToolResultProps) {
+  // Permission denial — surface a concise red line so the user can see the
+  // tool was blocked. The full guidance text is kept in the tool_result that
+  // goes back to the model.
+  if (result.startsWith('[YOME_PERMISSION_DENIED]')) {
+    return (
+      <Box marginLeft={4}>
+        <Text color="red">{`✕ ${name} — permission denied`}</Text>
+      </Box>
+    );
+  }
+
   // Read, LS, Grep, Glob, Bash — don't show content to user (it's for the AI)
   if (name === 'Read' || name === 'LS' || name === 'Grep' || name === 'Glob') {
     return null;

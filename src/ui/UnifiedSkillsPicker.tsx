@@ -1,7 +1,8 @@
 // UnifiedSkillsPicker — TUI for `/skills` slash command.
 //
 // Lists every skill the agent knows about, regardless of system:
-//   - prompt skills: SKILL.md files under .yome/skills or .claude/skills
+//   - prompt skills: SKILL.md files under .yome/skills (Claude Code FORMAT,
+//                    but yome paths only — we don't read ~/.claude)
 //   - hub skills:    yome-skill.json packages installed via `yome skill install`
 //
 // The kind column lets the user immediately see what they're toggling.
@@ -64,87 +65,102 @@ export function UnifiedSkillsPicker({
   const promptCount = skills.filter((s) => s.kind === 'prompt').length;
   const hubCount = skills.filter((s) => s.kind === 'hub').length;
 
+  // Fixed column widths derived from longest cell content. Pointer slot,
+  // toggle slot, and the gap between them are constants so every row
+  // (focused or not) lines up exactly. The detail block under a focused
+  // row reuses the same prefix indent so it visually nests under the name
+  // column rather than floating at a magic offset.
+  const POINTER_W = 2;   // '>' + space
+  const TOGGLE_W = 2;    // '●' + space
+  const GAP_W = 2;       // gutter before the name column
+  const PREFIX_W = POINTER_W + TOGGLE_W + GAP_W; // 6 — detail indent
+  const nameColW = maxNameLen + 2;
+  const kindColW = maxKindLen + 2;
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width="100%">
-      <Box marginBottom={1}>
-        <Text bold color="#E87B35">Skills </Text>
-        <Text dimColor>
-          {'\u2014'} {hubCount} hub · {promptCount} prompt
-        </Text>
+    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} paddingY={0} width="100%">
+      {/* Header */}
+      <Box>
+        <Text bold color="#E87B35">Skills</Text>
+        <Text dimColor>{'  '}{'\u2014'}{'  '}{hubCount} hub  ·  {promptCount} prompt</Text>
       </Box>
 
+      <Box marginTop={1} marginBottom={1}>
+        <Text dimColor>{'\u2500'.repeat(60)}</Text>
+      </Box>
+
+      {/* Empty state */}
       {skills.length === 0 && (
-        <>
+        <Box flexDirection="column">
           <Text dimColor>No skills installed yet.</Text>
           <Box marginTop={1} flexDirection="column">
             <Text dimColor>Try one of:</Text>
-            <Text dimColor>  · /plugins             open the hub marketplace</Text>
-            <Text dimColor>  · ~/.yome/skills/foo/SKILL.md      add a prompt skill</Text>
-            <Text dimColor>  · ~/.claude/skills/foo/SKILL.md    Claude Code-format skill</Text>
+            <Text dimColor>  · /plugins                              open the hub marketplace</Text>
+            <Text dimColor>  · ~/.yome/skills/&lt;name&gt;/SKILL.md       add a prompt skill (user)</Text>
+            <Text dimColor>  · ./.yome/skills/&lt;name&gt;/SKILL.md       add a prompt skill (project)</Text>
           </Box>
-        </>
+        </Box>
       )}
 
+      {/* List */}
       {skills.map((s, i) => {
         const isFocused = i === cursor;
-        // ASCII '>' is single-column on every terminal — '\u276F' (❯) gets
-        // rendered double-wide on macOS Terminal/iTerm, which shifted the
-        // focused row 1 cell to the right and broke alignment with the
-        // unfocused rows. Wrap pointer in a fixed-width Box so the slot
-        // takes the same space whether focused or not.
-        const toggle = s.enabled ? '\u25C9' : '\u25CB';
-        const toggleColor = s.enabled ? '#E87B35' : 'gray';
-
-        // Use ink's flex layout (fixed-width columns + wrap=truncate-end on
-        // the description) instead of string .padEnd. padEnd uses JS char
-        // count, which double-counts CJK glyphs (terminal renders them at
-        // 2 columns) and lets long descriptions wrap mid-row, breaking the
-        // grid alignment for hub skills (which often have CJK descriptions).
-        const nameColWidth = maxNameLen + 2;
-        const kindColWidth = maxKindLen + 2;
+        const toggle = s.enabled ? '\u25CF' : '\u25CB';
 
         return (
           <Box key={s.id} flexDirection="column">
             <Box>
-              <Box width={2} flexShrink={0}>
+              <Box width={POINTER_W} flexShrink={0}>
                 <Text color={isFocused ? '#E87B35' : undefined} bold={isFocused}>
                   {isFocused ? '>' : ' '}
                 </Text>
               </Box>
-              <Text>{'  '}</Text>
-              <Text color={toggleColor}>{toggle}</Text>
-              <Text>{'  '}</Text>
-              <Box width={nameColWidth} flexShrink={0}>
+              <Box width={TOGGLE_W} flexShrink={0}>
+                <Text color="#E87B35">{toggle}</Text>
+              </Box>
+              <Box width={GAP_W} flexShrink={0}>
+                <Text> </Text>
+              </Box>
+              <Box width={nameColW} flexShrink={0}>
                 <Text bold color={isFocused ? '#E87B35' : undefined} wrap="truncate-end">
                   {s.name}
                 </Text>
               </Box>
-              <Box width={kindColWidth} flexShrink={0}>
+              <Box width={kindColW} flexShrink={0}>
                 <Text dimColor wrap="truncate-end">{originLabel(s)}</Text>
               </Box>
-              <Box flexGrow={1}>
+              <Box flexGrow={1} flexShrink={1}>
                 <Text dimColor wrap="truncate-end">{s.description}</Text>
               </Box>
             </Box>
+
             {isFocused && (
-              <Box marginLeft={7} flexDirection="column">
+              <Box marginLeft={PREFIX_W} marginTop={0} marginBottom={1} flexDirection="column">
                 {s.kind === 'hub' && (
                   <>
-                    <Text dimColor wrap="truncate-end">
-                      slug: {s.slug} · v{s.version} · domain {s.domain}
-                    </Text>
+                    <Box>
+                      <Box width={9} flexShrink={0}><Text dimColor>slug</Text></Box>
+                      <Text dimColor wrap="truncate-end">{s.slug}  ·  v{s.version}  ·  {s.domain}</Text>
+                    </Box>
                     {s.source && (
-                      <Text dimColor wrap="truncate-end">source: {s.source}</Text>
+                      <Box>
+                        <Box width={9} flexShrink={0}><Text dimColor>source</Text></Box>
+                        <Text dimColor wrap="truncate-end">{s.source}</Text>
+                      </Box>
                     )}
                     {s.allowedCapabilities && s.allowedCapabilities.length > 0 && (
-                      <Text dimColor wrap="truncate-end">
-                        caps: {s.allowedCapabilities.join(', ')}
-                      </Text>
+                      <Box>
+                        <Box width={9} flexShrink={0}><Text dimColor>caps</Text></Box>
+                        <Text dimColor wrap="truncate-end">{s.allowedCapabilities.join(', ')}</Text>
+                      </Box>
                     )}
                   </>
                 )}
                 {s.kind === 'prompt' && (
-                  <Text dimColor wrap="truncate-end">file: {s.installedAt}/SKILL.md</Text>
+                  <Box>
+                    <Box width={9} flexShrink={0}><Text dimColor>file</Text></Box>
+                    <Text dimColor wrap="truncate-end">{s.installedAt}/SKILL.md</Text>
+                  </Box>
                 )}
               </Box>
             )}
@@ -152,11 +168,13 @@ export function UnifiedSkillsPicker({
         );
       })}
 
+      {/* Footer */}
       <Box marginTop={1}>
-        <Text dimColor>
-          {'\u2191\u2193'} nav {'  '} Space/Enter toggle {'  '} a add (hub){'  '}
-          {focused?.kind === 'hub' ? 'u uninstall  ' : ''}
-          Esc close
+        <Text dimColor>{'\u2500'.repeat(60)}</Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor wrap="truncate-end">
+          <Text color="#E87B35">{'\u2191\u2193'}</Text> nav   <Text color="#E87B35">Space</Text> toggle   <Text color="#E87B35">a</Text> add{focused?.kind === 'hub' ? <>   <Text color="#E87B35">u</Text> uninstall</> : ''}   <Text color="#E87B35">Esc</Text> close
         </Text>
       </Box>
     </Box>

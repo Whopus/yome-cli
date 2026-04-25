@@ -1,6 +1,7 @@
 import { callLLMStream } from '../llm.js';
 import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
 import type { ContentBlock } from '../types.js';
+import { REJECT_SENTINEL } from '../tools/index.js';
 
 const MAX_ITERATIONS = 30;
 
@@ -46,7 +47,18 @@ export class SimpleAgentLoop implements AgentLoop {
         }
 
         const toolResults: ContentBlock[] = [];
+        let userRejected = false;
         for (const block of toolUseBlocks) {
+          if (userRejected) {
+            // Short-circuit remaining tool_uses in this batch with a synthetic
+            // rejection so the API stays paired (every tool_use needs a result).
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: `${REJECT_SENTINEL} Skipped — user rejected an earlier tool use in this turn.`,
+            });
+            continue;
+          }
           cb.onToolUse(block.name, block.input);
           const result = await ctx.executeTool(block.name, block.input);
           cb.onToolResult(block.name, result);
@@ -55,6 +67,9 @@ export class SimpleAgentLoop implements AgentLoop {
             tool_use_id: block.id,
             content: result,
           });
+          if (typeof result === 'string' && result.startsWith(REJECT_SENTINEL)) {
+            userRejected = true;
+          }
         }
 
         ctx.messages.push({ role: 'user', content: toolResults });

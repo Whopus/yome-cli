@@ -377,6 +377,7 @@ function doValidate(args: string[], flags: SkillCliFlags): number {
   return 1;
 }
 
+
 function doDoctor(flags: SkillCliFlags): number {
   const r = runDoctor();
   if (flags.json) {
@@ -399,17 +400,22 @@ function doDoctor(flags: SkillCliFlags): number {
 
 async function doRollback(args: string[], flags: SkillCliFlags): Promise<number> {
   const slug = args[0];
-  if (!slug) { console.error('Usage: yome skill rollback <@owner/name>'); return 2; }
+  if (!slug) {
+    console.error('Usage: yome skill rollback <slug>');
+    return 2;
+  }
   const r = await rollbackBySlug(slug);
   if (flags.json) {
     process.stdout.write(JSON.stringify(r, null, 2) + '\n');
     return r.ok ? 0 : 1;
   }
-  if (!r.ok) { console.error(`✗ ${r.reason}`); return 1; }
-  const arrow = r.previousVersion && r.restoredVersion
-    ? `v${r.previousVersion} → v${r.restoredVersion}`
-    : '(versions unknown)';
-  console.log(`✓ rolled back ${slug}: ${arrow}`);
+  if (!r.ok) {
+    console.error(`✗ rollback failed: ${r.reason ?? 'unknown error'}`);
+    return 1;
+  }
+  const from = r.previousVersion ? ` from ${r.previousVersion}` : '';
+  const to = r.restoredVersion ? ` to ${r.restoredVersion}` : '';
+  console.log(`✓ rolled back ${r.slug ?? slug}${from}${to}`);
   return 0;
 }
 

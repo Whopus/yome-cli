@@ -4,8 +4,7 @@ import { Agent } from '../agent.js';
 import { getVersion, loadModelEntries } from '../config.js';
 import type { ModelEntry } from '../config.js';
 import { isSkillDisabled, isAgentDisabled, toggleSkill, toggleAgent } from '../toggleState.js';
-import { addPermissionRuleToUserSettings } from '../permissions/loader.js';
-import { serializeRuleValue } from '../permissions/ruleParser.js';
+import { addPermissionRuleToUserSettings, extractBashRulePrefix } from '../permissions/loader.js';
 import { MessageList, getToolLabel, getToolDetail } from './MessageList.js';
 import { InputBar } from './InputBar.js';
 import type { SlashCommand } from './InputBar.js';
@@ -13,7 +12,8 @@ import { Banner } from './Banner.js';
 import { AgentPicker } from './AgentPicker.js';
 import { ModelPicker } from './ModelPicker.js';
 import { SessionPicker } from './SessionPicker.js';
-import { PermissionPrompt } from './PermissionPrompt.js';
+import { PermissionPrompt, type PermissionChoice } from './PermissionPrompt.js';
+import type { AskPermissionResult } from '../tools/index.js';
 import { TogglePicker } from './TogglePicker.js';
 import { UnifiedSkillsPicker } from './UnifiedSkillsPicker.js';
 import { MarketplacePicker } from './MarketplacePicker.js';
@@ -28,15 +28,24 @@ import type { PermissionMode } from '../permissions/types.js';
 import type { PastedImage } from '../utils/imagePaste.js';
 import { getImageFromClipboard } from '../utils/imagePaste.js';
 import type { ImageBlock } from '../types.js';
+import { useThrottledStream } from './useThrottledStream.js';
+import { ShimmerText } from './ShimmerText.js';
 
 interface AppProps {
   config: YomeConfig;
 }
 
+// Monotonic id source for messages. Required by <Static> so React can
+// keep stable keys across renders even when older messages mutate
+// (e.g. a tool_start flipping `done`). Lives at module scope so it's
+// stable across re-mounts within the same process.
+let _msgIdSeq = 0;
+const nextMsgId = (): number => ++_msgIdSeq;
+
 export function App({ config }: AppProps) {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [streamText, setStreamText] = useState('');
+  const stream = useThrottledStream();
   const [inputValue, setInputValue] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [showAgentPicker, setShowAgentPicker] = useState(false);
@@ -51,7 +60,8 @@ export function App({ config }: AppProps) {
     toolName: string;
     message: string;
     detail: string;
-    resolve: (allowed: boolean) => void;
+    suggestedRule: string;
+    resolve: (result: AskPermissionResult) => void;
   } | null>(null);
   const pendingPermissionRef = useRef(pendingPermission);
   pendingPermissionRef.current = pendingPermission;
@@ -74,7 +84,7 @@ export function App({ config }: AppProps) {
       if (prompt === '/new') {
         agent.resetContext();
         setMessages([]);
-        setStreamText('');
+        stream.reset();
         setUsage({ inputTokens: 0, outputTokens: 0 });
         isFirstMessage.current = true;
         return;
@@ -82,11 +92,14 @@ export function App({ config }: AppProps) {
 
       // /login — mock login command
       if (prompt === '/login') {
-        setMessages((prev) => [...prev, { type: 'text', content: '🔒 Login requested. This is a mock implementation.' }]);
-        setMessages((prev) => [...prev, { type: 'text', content: 'Enter your credentials (mock):' }]);
-        setMessages((prev) => [...prev, { type: 'text', content: '• Username: `user@example.com`' }]);
-        setMessages((prev) => [...prev, { type: 'text', content: '• Password: `••••••••`' }]);
-        setMessages((prev) => [...prev, { type: 'text', content: '✅ Login successful! You are now authenticated.' }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: nextMsgId(), type: 'text', content: '🔒 Login requested. This is a mock implementation.' },
+          { id: nextMsgId(), type: 'text', content: 'Enter your credentials (mock):' },
+          { id: nextMsgId(), type: 'text', content: '• Username: `user@example.com`' },
+          { id: nextMsgId(), type: 'text', content: '• Password: `••••••••`' },
+          { id: nextMsgId(), type: 'text', content: '✅ Login successful! You are now authenticated.' },
+        ]);
         return;
       }
 
@@ -120,6 +133,7 @@ export function App({ config }: AppProps) {
         const argsText = prompt.replace(/^\/skill\s*/, '').trim();
         if (argsText.length === 0) {
           setMessages((prev) => [...prev, {
+            id: nextMsgId(),
             type: 'text',
             content: 'Usage: `/skill <subcommand>` — try `install github:owner/repo`, `list`, `uninstall <slug>`, or open `/skills` for the picker.',
           }]);
@@ -140,7 +154,7 @@ export function App({ config }: AppProps) {
           console.error = origErr;
         }
         const out = captured.join('\n').trim() || '(no output)';
-        setMessages((prev) => [...prev, { type: 'text', content: '```\n' + out + '\n```' }]);
+        setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: '```\n' + out + '\n```' }]);
         // Refresh the cache so a follow-up /skills sees the result.
         setUnifiedSkillsCache(listAllUnified(true));
         return;
@@ -171,8 +185,8 @@ export function App({ config }: AppProps) {
       const imageLabel = images.length > 0
         ? ` [${images.length} image${images.length > 1 ? 's' : ''}]`
         : '';
-      setMessages((prev) => [...prev, { type: 'user', content: (prompt || '(image)') + imageLabel }]);
-      setStreamText('');
+      setMessages((prev) => [...prev, { id: nextMsgId(), type: 'user', content: (prompt || '(image)') + imageLabel }]);
+      stream.reset();
       setIsRunning(true);
 
       // Persist user message to session
@@ -182,30 +196,52 @@ export function App({ config }: AppProps) {
         isFirstMessage.current = false;
       }
 
+      // Local accumulator for the current assistant turn — written to from
+      // onTextDelta, snapshotted into a real Message on tool boundaries
+      // and onDone. We track it via a closure variable rather than the
+      // throttled stream's buffer so persisting + flushing stay accurate
+      // even when tokens arrive faster than the throttle interval.
       let currentText = '';
 
+      const commitStreamingText = () => {
+        if (!currentText) return;
+        const text = currentText;
+        currentText = '';
+        // Flush the throttled buffer first so we don't see a stale tail
+        // flicker after the message gets pushed.
+        stream.reset();
+        setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: text }]);
+      };
+
       await agent.run(prompt || 'What is in this image?', {
-        async onAskPermission(toolName, message, input) {
+        async onAskPermission(toolName, message, input): Promise<AskPermissionResult> {
           const detail = toolName === 'Bash'
             ? (input.command as string) ?? ''
             : (input.file_path as string) ?? '';
-          return new Promise<boolean>((resolve) => {
-            setPendingPermission({ toolName, message, detail, resolve });
+          // Compute the most useful "always allow" rule string for this call.
+          // - Bash: derive command prefix like `Bash(npm run:*)` so the rule
+          //   only matches similar commands instead of all shell access.
+          // - Other tools: fall back to plain tool name so a single approval
+          //   silences future prompts for that tool.
+          let suggestedRule = toolName;
+          if (toolName === 'Bash') {
+            const prefix = extractBashRulePrefix(detail);
+            suggestedRule = prefix ? `Bash(${prefix})` : `Bash(${detail})`;
+          }
+          return new Promise<AskPermissionResult>((resolve) => {
+            setPendingPermission({ toolName, message, detail, suggestedRule, resolve });
           });
         },
         onTextDelta(delta) {
           currentText += delta;
-          setStreamText(currentText);
+          stream.append(delta);
         },
         onToolUse(name, input) {
-          if (currentText) {
-            setMessages((prev) => [...prev, { type: 'text', content: currentText }]);
-            currentText = '';
-            setStreamText('');
-          }
+          commitStreamingText();
           setMessages((prev) => [
             ...prev,
             {
+              id: nextMsgId(),
               type: 'tool_start',
               content: name,
               toolName: name,
@@ -223,15 +259,17 @@ export function App({ config }: AppProps) {
                 break;
               }
             }
-            return [...updated, { type: 'tool_result', content: result, toolName: name }];
+            return [...updated, { id: nextMsgId(), type: 'tool_result', content: result, toolName: name }];
           });
         },
         onDone(u) {
           if (currentText) {
-            setMessages((prev) => [...prev, { type: 'text', content: currentText }]);
-            agent.persistMessage({ role: 'assistant', content: currentText });
-            setStreamText('');
+            const text = currentText;
+            currentText = '';
+            setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: text }]);
+            agent.persistMessage({ role: 'assistant', content: text });
           }
+          stream.reset();
           setUsage((prev) => ({
             inputTokens: prev.inputTokens + u.inputTokens,
             outputTokens: prev.outputTokens + u.outputTokens,
@@ -239,12 +277,13 @@ export function App({ config }: AppProps) {
           setIsRunning(false);
         },
         onError(err) {
-          setMessages((prev) => [...prev, { type: 'error', content: err.message }]);
+          setMessages((prev) => [...prev, { id: nextMsgId(), type: 'error', content: err.message }]);
+          stream.reset();
           setIsRunning(false);
         },
       }, images.length > 0 ? images : undefined);
     },
-    [agent, isRunning, pendingImages],
+    [agent, isRunning, pendingImages, stream],
   );
 
   const handleAgentSelect = useCallback(
@@ -254,7 +293,7 @@ export function App({ config }: AppProps) {
       setShowAgentPicker(false);
       setMessages((prev) => [
         ...prev,
-        { type: 'text', content: `Switched to **${name}** agent loop.` },
+        { id: nextMsgId(), type: 'text', content: `Switched to **${name}** agent loop.` },
       ]);
     },
     [agent],
@@ -271,7 +310,7 @@ export function App({ config }: AppProps) {
       setShowModelPicker(false);
       setMessages((prev) => [
         ...prev,
-        { type: 'text', content: `Switched to model **${entry.displayName}** (${entry.model}).` },
+        { id: nextMsgId(), type: 'text', content: `Switched to model **${entry.displayName}** (${entry.model}).` },
       ]);
     },
     [agent],
@@ -294,7 +333,7 @@ export function App({ config }: AppProps) {
                 .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
                 .map((b) => b.text)
                 .join(' ');
-          uiMessages.push({ type: 'user', content: text });
+          uiMessages.push({ id: nextMsgId(), type: 'user', content: text });
         } else if (msg.role === 'assistant') {
           const text = typeof msg.content === 'string'
             ? msg.content
@@ -302,49 +341,55 @@ export function App({ config }: AppProps) {
                 .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
                 .map((b) => b.text)
                 .join(' ');
-          if (text) uiMessages.push({ type: 'text', content: text });
+          if (text) uiMessages.push({ id: nextMsgId(), type: 'text', content: text });
         }
       }
       setMessages(uiMessages);
-      setStreamText('');
+      stream.reset();
       setUsage({ inputTokens: 0, outputTokens: 0 });
       isFirstMessage.current = false;
       setShowSessionPicker(false);
     },
-    [agent],
+    [agent, stream],
   );
 
   const handleSessionCancel = useCallback(() => {
     setShowSessionPicker(false);
   }, []);
 
-  const handlePermissionAllow = useCallback(() => {
-    if (pendingPermissionRef.current) {
-      pendingPermissionRef.current.resolve(true);
-      setPendingPermission(null);
+  const handlePermissionResolve = useCallback((choice: PermissionChoice) => {
+    const pending = pendingPermissionRef.current;
+    if (!pending) return;
+    const { toolName, resolve } = pending;
+    switch (choice.kind) {
+      case 'allow_once':
+        resolve({ decision: 'allow' });
+        break;
+      case 'allow_session':
+        // In-memory only — no disk write, vanishes on CLI restart.
+        agent.addPermissionRule(choice.ruleString, 'allow', 'session');
+        resolve({ decision: 'allow' });
+        setMessages((prev) => [
+          ...prev,
+          { id: nextMsgId(), type: 'text', content: `已添加本会话允许规则：\`${choice.ruleString}\`` },
+        ]);
+        break;
+      case 'allow_always':
+        // Persist + mirror into memory so the *current* session also benefits
+        // (was a bug previously: write went to disk but live ctx wasn't refreshed).
+        addPermissionRuleToUserSettings(choice.ruleString, 'allow');
+        agent.addPermissionRule(choice.ruleString, 'allow', 'userSettings');
+        resolve({ decision: 'allow' });
+        setMessages((prev) => [
+          ...prev,
+          { id: nextMsgId(), type: 'text', content: `已永久允许规则：\`${choice.ruleString}\`（写入 ~/.yome/settings.json）` },
+        ]);
+        break;
+      case 'deny':
+        resolve({ decision: 'deny', feedback: choice.feedback });
+        break;
     }
-  }, []);
-
-  const handlePermissionDeny = useCallback(() => {
-    if (pendingPermissionRef.current) {
-      pendingPermissionRef.current.resolve(false);
-      setPendingPermission(null);
-    }
-  }, []);
-
-  const handlePermissionAlwaysAllow = useCallback(() => {
-    if (pendingPermissionRef.current) {
-      const { toolName } = pendingPermissionRef.current;
-      addPermissionRuleToUserSettings(toolName, 'allow');
-      // Also update the in-memory context so it takes effect immediately
-      agent.switchPermissionMode(agent.getPermissionContext().mode); // triggers re-init won't help — we need to reload
-      pendingPermissionRef.current.resolve(true);
-      setPendingPermission(null);
-      setMessages((prev) => [
-        ...prev,
-        { type: 'text', content: `**${toolName}** added to always-allow rules.` },
-      ]);
-    }
+    setPendingPermission(null);
   }, [agent]);
 
   const buildSkillItems = useCallback((): ToggleItem[] => {
@@ -370,14 +415,14 @@ export function App({ config }: AppProps) {
     const nowEnabled = toggleSkill(name);
     setPickerVersion((v) => v + 1);
     const status = nowEnabled ? 'enabled' : 'disabled';
-    setMessages((prev) => [...prev, { type: 'text', content: `Skill **${name}** ${status}.` }]);
+    setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: `Skill **${name}** ${status}.` }]);
   }, []);
 
   const handleAgentToggle = useCallback((name: string) => {
     const nowEnabled = toggleAgent(name);
     setPickerVersion((v) => v + 1);
     const status = nowEnabled ? 'enabled' : 'disabled';
-    setMessages((prev) => [...prev, { type: 'text', content: `Agent **${name}** ${status}.` }]);
+    setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: `Agent **${name}** ${status}.` }]);
   }, []);
 
   // ── Unified /skills handlers ──────────────────────────────────
@@ -390,6 +435,7 @@ export function App({ config }: AppProps) {
     if (s.kind === 'prompt') {
       const nowEnabled = toggleSkill(s.name);
       setMessages((prev) => [...prev, {
+        id: nextMsgId(),
         type: 'text',
         content: `Skill **${s.name}** ${nowEnabled ? 'enabled' : 'disabled'}.`,
       }]);
@@ -397,10 +443,11 @@ export function App({ config }: AppProps) {
       // hub: enabled = currently enabled; we want the opposite
       const r = setSkillEnabled(s.slug!, !s.enabled);
       if (!r.ok) {
-        setMessages((prev) => [...prev, { type: 'error', content: r.reason ?? 'toggle failed' }]);
+        setMessages((prev) => [...prev, { id: nextMsgId(), type: 'error', content: r.reason ?? 'toggle failed' }]);
         return;
       }
       setMessages((prev) => [...prev, {
+        id: nextMsgId(),
         type: 'text',
         content: `Hub skill **${s.slug}** ${!s.enabled ? 'enabled' : 'disabled'}.`,
       }]);
@@ -412,10 +459,10 @@ export function App({ config }: AppProps) {
     if (s.kind !== 'hub' || !s.slug) return;
     const r = uninstallBySlug(s.slug);
     if (!r.ok) {
-      setMessages((prev) => [...prev, { type: 'error', content: r.reason ?? 'uninstall failed' }]);
+      setMessages((prev) => [...prev, { id: nextMsgId(), type: 'error', content: r.reason ?? 'uninstall failed' }]);
       return;
     }
-    setMessages((prev) => [...prev, { type: 'text', content: `Removed hub skill **${s.slug}**.` }]);
+    setMessages((prev) => [...prev, { id: nextMsgId(), type: 'text', content: `Removed hub skill **${s.slug}**.` }]);
     refreshUnifiedSkills();
   }, [refreshUnifiedSkills]);
 
@@ -431,6 +478,7 @@ export function App({ config }: AppProps) {
 
   const handleMarketplaceInstalled = useCallback((slug: string) => {
     setMessages((prev) => [...prev, {
+      id: nextMsgId(),
       type: 'text',
       content: `Installed hub skill **${slug}** from marketplace.`,
     }]);
@@ -487,20 +535,23 @@ export function App({ config }: AppProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {messages.length === 0 && !isRunning && !showAgentPicker && <Banner />}
+      {!showAgentPicker && <Banner />}
 
       {messages.length > 0 && (
         <Box marginBottom={1} marginTop={1}>
           <Text bold color="#E87B35">{'> '}</Text>
           <Text bold>Yome</Text>
-          <Text dimColor> v{version}</Text>
+          <Text> </Text>
+          {isRunning
+            ? <ShimmerText text="streaming" />
+            : <Text dimColor>Waiting</Text>}
           {totalTokens > 0 && (
             <Text dimColor> {'\u00B7'} {(totalTokens / 1000).toFixed(1)}k tokens</Text>
           )}
         </Box>
       )}
 
-      <MessageList messages={messages} streamText={streamText} isRunning={isRunning} />
+      <MessageList messages={messages} streamText={stream.displayText} isRunning={isRunning} />
 
       {showAgentPicker && (
         <Box marginTop={1}>
@@ -577,9 +628,8 @@ export function App({ config }: AppProps) {
           toolName={pendingPermission.toolName}
           message={pendingPermission.message}
           detail={pendingPermission.detail}
-          onAllow={handlePermissionAllow}
-          onDeny={handlePermissionDeny}
-          onAlwaysAllow={handlePermissionAlwaysAllow}
+          suggestedRule={pendingPermission.suggestedRule}
+          onResolve={handlePermissionResolve}
         />
       )}
 

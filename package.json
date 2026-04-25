@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "bun --watch src/index.tsx",
-    "start": "node bin/yome.mjs",
+    "start": "node bin/yome.js",
     "prepublishOnly": "npm run build"
   },
   "engines": {

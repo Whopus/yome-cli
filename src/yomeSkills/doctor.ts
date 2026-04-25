@@ -41,6 +41,7 @@ function listInstallDirs(): { slug: string; dir: string; isLink: boolean; linkTa
   const root = getYomeSkillsRoot();
   if (!existsSync(root)) return [];
   const out: { slug: string; dir: string; isLink: boolean; linkTarget?: string }[] = [];
+
   for (const owner of readdirSync(root)) {
     if (owner.startsWith('.')) continue;
     const ownerPath = join(root, owner);
@@ -156,6 +157,11 @@ export function runDoctor(): DoctorReport {
     }
   }
 
+  console.log('DOCTOR REPORT:', JSON.stringify({
+    ok: issues.filter(i => i.level === 'error').length === 0,
+    scanned: installs.length,
+    issues,
+  }, null, 2));
   return {
     ok: issues.filter(i => i.level === 'error').length === 0,
     scanned: installs.length,

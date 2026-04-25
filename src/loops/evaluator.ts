@@ -1,6 +1,7 @@
 import { callLLM, extractText, callLLMStream } from '../llm.js';
 import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
 import type { ContentBlock, AgentMessage } from '../types.js';
+import { REJECT_SENTINEL } from '../tools/index.js';
 
 const MAX_GENERATOR_ITERATIONS = 20;
 const MAX_EVAL_ROUNDS = 3;
@@ -72,11 +73,17 @@ export class EvaluatorAgentLoop implements AgentLoop {
           if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') break;
 
           const toolResults: ContentBlock[] = [];
+          let userRejected = false;
           for (const block of toolUseBlocks) {
+            if (userRejected) {
+              toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `${REJECT_SENTINEL} Skipped — user rejected an earlier tool use in this turn.` });
+              continue;
+            }
             cb.onToolUse(block.name, block.input);
             const result = await ctx.executeTool(block.name, block.input);
             cb.onToolResult(block.name, result);
             toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+            if (typeof result === 'string' && result.startsWith(REJECT_SENTINEL)) userRejected = true;
           }
           genMessages.push({ role: 'user', content: toolResults });
         }

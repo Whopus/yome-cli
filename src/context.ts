@@ -34,16 +34,58 @@ function getFileTree(dir: string, depth = 2, prefix = ''): string {
   return lines.filter(Boolean).join('\n');
 }
 
+// ── Caches for the per-cwd metadata block ───────────────────────────
+//
+// `buildSystemPrompt()` runs on agent construction AND on every
+// resetContext / restoreSession / reloadSkills. Each call previously
+// shelled out to `git rev-parse`, `git status --porcelain`, and walked
+// the project tree synchronously. On a busy session that's a measurable
+// stutter every time the user runs `/new` or installs a skill.
+//
+// Cache key: cwd. TTL: 60s. Long enough that interactive use is fast,
+// short enough that branch switches / git status changes show up
+// without a CLI restart.
+interface CwdMetaCache {
+  cwd: string;
+  expiresAt: number;
+  gitBranch: string | null;
+  gitStatus: string | null;
+  tree: string;
+}
+let _cwdMetaCache: CwdMetaCache | null = null;
+const CWD_META_TTL_MS = 60_000;
+
+function getCwdMeta(cwd: string): CwdMetaCache {
+  const now = Date.now();
+  if (_cwdMetaCache && _cwdMetaCache.cwd === cwd && _cwdMetaCache.expiresAt > now) {
+    return _cwdMetaCache;
+  }
+  _cwdMetaCache = {
+    cwd,
+    expiresAt: now + CWD_META_TTL_MS,
+    gitBranch: safeExec('git rev-parse --abbrev-ref HEAD', cwd),
+    gitStatus: safeExec('git status --porcelain', cwd),
+    tree: getFileTree(cwd),
+  };
+  return _cwdMetaCache;
+}
+
+/** Force a re-fetch of git/tree info on next buildSystemPrompt call. */
+export function invalidateCwdMeta(): void {
+  _cwdMetaCache = null;
+}
+
 export function buildSystemPrompt(): string {
   const cwd = process.cwd();
   const projectName = basename(cwd);
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
-  const gitBranch = safeExec('git rev-parse --abbrev-ref HEAD', cwd);
-  const gitStatus = safeExec('git status --porcelain', cwd);
+  const meta = getCwdMeta(cwd);
+  const gitBranch = meta.gitBranch;
+  const gitStatus = meta.gitStatus;
   const isGit = gitBranch !== null;
-  const tree = getFileTree(cwd);
+  const tree = meta.tree;
 
   let prompt = `You are Yome, an AI coding assistant running in the user's terminal.
 You help with software engineering tasks: reading code, writing code, debugging, refactoring, and running commands.
@@ -109,45 +151,90 @@ You have these tools: Read, Edit, Write, Bash, Glob, Grep, LS.
   return prompt;
 }
 
+/**
+ * Prompt skills (Claude Code SKILL.md format) get the same 3-row L1
+ * shape as hub skills, just with different field sources:
+ *   when    ← frontmatter `when_to_use` (or `description` as fallback)
+ *   effects ← always "loads markdown body into context (prompt-only)"
+ *             unless the SKILL.md explicitly grants `allowed-tools`
+ *   start   ← `/skill-name [argument-hint]`
+ *
+ * Same visual shape means the model doesn't have to context-switch
+ * between two different docs styles when scanning available skills.
+ */
 function buildSkillsSection(skills: Skill[]): string {
-  let section = `\n## Available Skills (prompt)\nThe user can invoke skills with \`/skill-name [args]\`. You can also invoke them when appropriate.\n\n`;
+  let section = `\n## Available Skills (prompt)\nUser invokes with \`/skill-name [args]\`; you can invoke them too when appropriate.\n\n`;
   for (const skill of skills) {
-    section += `### /${skill.name}\n`;
-    section += `${skill.description}\n`;
-    if (skill.whenToUse) section += `When to use: ${skill.whenToUse}\n`;
-    if (skill.argumentHint) section += `Usage: /${skill.name} ${skill.argumentHint}\n`;
-    section += `Source: ${skill.source}\n\n`;
+    const head = `/${skill.name}`;
+    const pad = ' '.repeat(head.length);
+    const when = skill.whenToUse ?? skill.description;
+    const entry = skill.argumentHint ? `/${skill.name} ${skill.argumentHint}` : `/${skill.name}`;
+    const effects = (skill.allowedTools && skill.allowedTools.length > 0)
+      ? `runs tools: ${skill.allowedTools.join(', ')}`
+      : `prompt-only (no tools)`;
+
+    section += `${head} | when:    ${when}\n`;
+    section += `${pad} | effects: ${effects}\n`;
+    section += `${pad} | start:   ${entry}\n`;
   }
   return section;
 }
 
+/**
+ * Hub skills are surfaced to the LLM in three layers:
+ *   L1 — this section: ONE skill = THREE short rows answering the only
+ *        questions the model actually has when picking a tool —
+ *          when    (trigger condition)
+ *          effects (truthful side effects)
+ *          start   (first command to discover the rest)
+ *        Authored as `l1: { when, entry, effects }` in yome-skill.json.
+ *   L2 — `<domain> --help` (kernel reads SIGNATURE.md, fallback auto-gen).
+ *   L3 — `<domain> --doc [name]` for cookbook templates / themes.
+ *
+ * The model is told once, in the footer, that --help / --doc / batch exist
+ * for every installed skill — so individual L1 blocks stay focused on
+ * the trigger / effects / entry triad.
+ */
 function buildHubSkillsSection(entries: ReturnType<typeof getInstalledFast>): string {
-  let section = `\n## Installed Hub Skills (yome-skill packages)
-These are typed command packages installed by the user via \`yome skill install ...\`.
-Each one provides a fixed contract of commands and the capabilities granted to it.
-Prefer calling these packaged commands over open-ended shell when the task fits one of them.
-
-`;
+  let section = `\n## Installed Hub Skills\nUse the Bash tool: \`<domain> <action> [args]\` (no \`yome\` prefix, no SkillCall).\n\n`;
   for (const e of entries) {
-    section += `### ${e.slug} — ${e.name ?? e.domain} v${e.version}\n`;
-    if (e.description) section += `${e.description}\n`;
-    // Pull command list from the manifest on disk; cheap (<5KB JSON).
     const manifest = readManifest(e.installedAt);
-    const caps =
-      (e.allowed_capabilities && e.allowed_capabilities.length > 0)
-        ? e.allowed_capabilities
-        : (manifest?.capabilities ?? []);
-    if (caps.length > 0) {
-      section += `Capabilities: ${caps.join(', ')}\n`;
-    }
-    if (manifest && Array.isArray(manifest.commands) && manifest.commands.length > 0) {
-      section += `Commands:\n`;
-      for (const c of manifest.commands as Array<{ action?: string; desc?: string }>) {
-        if (!c.action) continue;
-        section += `  - ${e.domain}.${c.action}` + (c.desc ? ` — ${c.desc}` : '') + `\n`;
-      }
-    }
-    section += `Installed at: ${e.installedAt}\n\n`;
+    section += renderL1Block(e.domain, manifest, e.description) + '\n';
   }
+  section += `\nFor any installed skill:
+  \`<domain> --help\`           one-screen signature (actions + args)
+  \`<domain> --doc\`            list cookbook templates / themes
+  \`<domain> --doc <name>\`     read one template
+  \`<domain> batch <<EOF…EOF\`  run several sub-commands in one call (--keep-going, --merge)
+`;
   return section;
+}
+
+/**
+ * Render the 3-row pipe-aligned L1 block for one skill. Falls back to
+ * legacy `prompt_line`, then to `<domain> — <description>` so older
+ * yome-skill.json files keep producing *something* useful.
+ */
+function renderL1Block(domain: string, manifest: ReturnType<typeof readManifest>, fallbackDesc?: string): string {
+  const l1 = manifest?.l1;
+
+  if (l1 && (l1.when || l1.entry || l1.effects)) {
+    // Right-pad the domain column so the pipes line up vertically — easier
+    // for the model to scan when several skills are listed.
+    const head = domain;
+    const pad = ' '.repeat(head.length);
+    const lines: string[] = [];
+    if (l1.when)    lines.push(`${head} | when:    ${l1.when}`);
+    if (l1.effects) lines.push(`${pad} | effects: ${l1.effects}`);
+    if (l1.entry)   lines.push(`${pad} | start:   ${l1.entry}`);
+    return lines.join('\n');
+  }
+
+  // Legacy single-line fallback — keeps backward compat with skills that
+  // used `prompt_line` before the structured l1 schema landed.
+  if (manifest?.prompt_line) {
+    return `- ${manifest.prompt_line}`;
+  }
+
+  return `- ${domain} — ${fallbackDesc ?? '(no description provided)'}`;
 }

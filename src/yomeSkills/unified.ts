@@ -20,7 +20,6 @@
 // tells the UI which actions apply.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadAllSkills, getUserSkillsDir, getProjectSkillsDir } from '../skills/loader.js';
 import type { Skill as PromptSkill } from '../skills/types.js';
@@ -29,7 +28,7 @@ import { isSkillDisabled as isHubSkillDisabled } from './enable.js';
 import { isSkillDisabled as isPromptSkillDisabled } from '../toggleState.js';
 
 export type UnifiedSkillKind = 'prompt' | 'hub';
-export type PromptOrigin = 'yome-user' | 'yome-project' | 'claude-user' | 'claude-project';
+export type PromptOrigin = 'yome-user' | 'yome-project';
 
 export interface UnifiedSkill {
   /** Stable identifier across reloads. */
@@ -58,16 +57,14 @@ export interface UnifiedSkill {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Prompt skill discovery (4 roots)
+// Prompt skill discovery (yome dirs only — never .claude)
 // ──────────────────────────────────────────────────────────────────────
-
-export function getClaudeUserSkillsDir(): string {
-  return join(homedir(), '.claude', 'skills');
-}
-
-export function getClaudeProjectSkillsDir(): string {
-  return join(process.cwd(), '.claude', 'skills');
-}
+//
+// We support the Claude Code SKILL.md FORMAT (so users can drop a
+// claude-style skill file unchanged into our directories), but we do
+// NOT scan ~/.claude/skills or <cwd>/.claude/skills — those belong to
+// Claude Code, not to us. Surfacing them here would mix in another
+// product's skills and confuse the user.
 
 interface FrontmatterParsed {
   description?: string;
@@ -127,19 +124,17 @@ function discoverPromptSkillsAt(dir: string, origin: PromptOrigin): RawPromptSki
 }
 
 /**
- * Discover prompt-style skills across all 4 roots. Project-level wins
- * over user-level on name collision, and yome wins over claude (since
- * the user explicitly chose to put it under .yome). The full priority
- * chain (last wins): claude-user → yome-user → claude-project → yome-project.
+ * Discover prompt-style skills under yome's two roots only:
+ *   ~/.yome/skills/<name>/SKILL.md       (user)
+ *   <cwd>/.yome/skills/<name>/SKILL.md   (project)
+ * Project-level wins over user-level on name collision.
  */
 export function discoverAllPromptSkills(): RawPromptSkill[] {
-  const claudeUser = discoverPromptSkillsAt(getClaudeUserSkillsDir(), 'claude-user');
   const yomeUser = discoverPromptSkillsAt(getUserSkillsDir(), 'yome-user');
-  const claudeProject = discoverPromptSkillsAt(getClaudeProjectSkillsDir(), 'claude-project');
   const yomeProject = discoverPromptSkillsAt(getProjectSkillsDir(), 'yome-project');
 
   const byName = new Map<string, RawPromptSkill>();
-  for (const s of [...claudeUser, ...yomeUser, ...claudeProject, ...yomeProject]) {
+  for (const s of [...yomeUser, ...yomeProject]) {
     byName.set(s.name, s);
   }
   return Array.from(byName.values());
@@ -230,10 +225,8 @@ export function listAllUnified(includeDisabled = true): UnifiedSkill[] {
 export function originLabel(s: UnifiedSkill): string {
   if (s.kind === 'hub') return s.isDevLink ? 'hub (dev-link)' : 'hub';
   switch (s.promptOrigin) {
-    case 'yome-user':      return 'prompt · ~/.yome';
-    case 'yome-project':   return 'prompt · .yome';
-    case 'claude-user':    return 'prompt · ~/.claude';
-    case 'claude-project': return 'prompt · .claude';
-    default:               return 'prompt';
+    case 'yome-user':    return 'prompt · ~/.yome';
+    case 'yome-project': return 'prompt · .yome';
+    default:             return 'prompt';
   }
 }

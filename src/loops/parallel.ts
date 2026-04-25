@@ -1,6 +1,7 @@
 import { callLLMStream } from '../llm.js';
 import type { AgentLoop, AgentLoopContext, AgentLoopCallbacks, UserInput } from './types.js';
 import type { ContentBlock } from '../types.js';
+import { REJECT_SENTINEL } from '../tools/index.js';
 
 const MAX_ITERATIONS = 30;
 

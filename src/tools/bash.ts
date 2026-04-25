@@ -2,74 +2,28 @@ import { spawn } from 'child_process';
 import type { ToolDef } from '../types.js';
 import type { PermissionResult, ToolPermissionContext } from '../permissions/types.js';
 import { isContentAllowed, isContentDenied } from '../permissions/checker.js';
-import { checkCapability } from '../yomeSkills/capabilityGuard.js';
+import { tryKernel } from '../skills/runner/kernel.js';
 
 const MAX_OUTPUT = 20_000;
+// Cap per-stream buffer to 4× the output limit. Without this, a runaway
+// command (`cat /dev/urandom`, broken `npm run build`) accumulates an
+// unbounded JS string in memory before we ever get to truncate it.
+// This is the difference between "tool reports truncated" and "node
+// process gets OOM-killed mid-session".
+const MAX_BUFFER = MAX_OUTPUT * 4;
 
-// ── Skill-aware command interception ────────────────────────────────
+// ── Yome agentic kernel intercept ─────────────────────────────────
 //
-// Per spec §7.6 + §11.4-D, when an installed skill needs an OS capability
-// (fs:read, fs:write, applescript, network, ...) the agent is supposed to
-// route through a guarded entry point so we can deny commands the user has
-// not granted that capability for.
+// Before we hand a command off to /bin/sh we ask the yome kernel whether
+// it owns the line. If `tokens[0]` matches the `domain` of an installed
+// hub skill, the kernel runs the action via the same dispatcher the
+// macOS app uses (with capability gating, AppleScript template render,
+// argv parsing, --help) and returns a synthetic stdout/stderr/exitCode.
 //
-// Convention chosen for v1 (intentionally narrow — easy to remove later):
-//
-//   yome-skill <slug> <capability> -- <real shell command>
-//
-// Example the LLM is taught to emit:
-//
-//   yome-skill @yome/ppt fs:write -- /usr/bin/osascript -e '...'
-//
-// We:
-//   1. Parse the prefix (first 4 tokens up to the literal `--`).
-//   2. Call capabilityGuard.checkCapability(slug, cap). On deny, return a
-//      stable error string that includes the cap so the LLM can pick a
-//      different action.
-//   3. On allow, hand the remaining tokens to /bin/sh -c as a normal
-//      command. The skill binary itself takes over from there.
-//
-// All other commands fall through to plain shell execution — the agent's
-// existing behaviour is preserved byte-for-byte.
+// Anything the kernel doesn't claim falls through to plain shell.
+// Compound shell (pipes, &&, ;, redirects, subshells) is never intercepted.
 
-interface SkillInvocation {
-  slug: string;
-  capability: string;
-  shellCommand: string;
-}
-
-const SKILL_PREFIX = 'yome-skill';
-
-function parseSkillInvocation(command: string): SkillInvocation | null {
-  // Cheap fast-path so we don't tokenise every bash command.
-  const trimmed = command.trimStart();
-  if (!trimmed.startsWith(SKILL_PREFIX + ' ')) return null;
-
-  // We look for the literal ` -- ` separator so callers can pass arbitrary
-  // shell after it (including unquoted spaces). The header tokens are
-  // simple ASCII (slug = `@owner/name`, cap = `verb:noun`), so a regex
-  // suffices for the head and we keep the tail as-is.
-  const sep = ' -- ';
-  const sepIdx = trimmed.indexOf(sep);
-  if (sepIdx < 0) return null;
-
-  const head = trimmed.slice(SKILL_PREFIX.length, sepIdx).trim();
-  const tail = trimmed.slice(sepIdx + sep.length);
-  if (!tail.trim()) return null;
-
-  const headParts = head.split(/\s+/);
-  if (headParts.length !== 2) return null;
-  const [slug, capability] = headParts;
-
-  // Conservative validation — refuse anything that looks like an injection
-  // attempt before we even consult the cap guard.
-  if (!/^@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(slug)) return null;
-  if (!/^[a-z]+(?::[a-z*]+)?$/.test(capability)) return null;
-
-  return { slug, capability, shellCommand: tail };
-}
-
-function runCommand(command: string, timeout: number): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+function runShell(command: string, timeout: number): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const proc = spawn('sh', ['-c', command], {
       cwd: process.cwd(),
@@ -79,6 +33,8 @@ function runCommand(command: string, timeout: number): Promise<{ stdout: string;
 
     let stdout = '';
     let stderr = '';
+    let stdoutOverflow = false;
+    let stderrOverflow = false;
     let killed = false;
 
     const timer = setTimeout(() => {
@@ -86,11 +42,31 @@ function runCommand(command: string, timeout: number): Promise<{ stdout: string;
       proc.kill('SIGTERM');
     }, timeout);
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    // Stream-side cap: once a buffer hits MAX_BUFFER chars we stop
+    // accumulating from that pipe. The child can keep running (we don't
+    // want to break commands that legitimately produce a lot of output —
+    // tests, builds, etc.) but the agent's memory stays bounded.
+    proc.stdout.on('data', (data) => {
+      if (stdoutOverflow) return;
+      stdout += data.toString();
+      if (stdout.length > MAX_BUFFER) {
+        stdout = stdout.slice(0, MAX_BUFFER);
+        stdoutOverflow = true;
+      }
+    });
+    proc.stderr.on('data', (data) => {
+      if (stderrOverflow) return;
+      stderr += data.toString();
+      if (stderr.length > MAX_BUFFER) {
+        stderr = stderr.slice(0, MAX_BUFFER);
+        stderrOverflow = true;
+      }
+    });
 
     proc.on('close', (code) => {
       clearTimeout(timer);
+      if (stdoutOverflow) stdout += `\n[stdout capped at ${MAX_BUFFER} chars]`;
+      if (stderrOverflow) stderr += `\n[stderr capped at ${MAX_BUFFER} chars]`;
       if (killed) {
         resolve({ stdout, stderr: `Command timed out after ${timeout / 1000}s`, exitCode: 124 });
       } else {
@@ -105,9 +81,25 @@ function runCommand(command: string, timeout: number): Promise<{ stdout: string;
   });
 }
 
+function formatOutput(stdout: string, stderr: string, exitCode: number): string {
+  if (exitCode === 0) {
+    const result = stdout.trim();
+    if (result.length > MAX_OUTPUT) {
+      return result.slice(0, MAX_OUTPUT) + `\n\n[Output truncated at ${MAX_OUTPUT} chars]`;
+    }
+    return result || '(no output)';
+  }
+  const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+  return `Exit code: ${exitCode}\n${output}`;
+}
+
 export const bashTool: ToolDef = {
   name: 'Bash',
-  description: 'Execute a shell command and return its output. Commands run in the current working directory.',
+  description:
+    'Execute a shell command and return its output. Commands run in the current working directory. ' +
+    'When the first token matches an installed hub skill domain (e.g. `ppt`), the yome agentic kernel ' +
+    'intercepts the line and dispatches to the skill instead of the system shell — capability checks ' +
+    'are enforced. Compound shell (pipes, &&, ;, redirects) always goes to /bin/sh.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -134,39 +126,17 @@ export const bashTool: ToolDef = {
     return { valid: true };
   },
   async execute(input) {
-    let command = input.command as string;
+    const command = input.command as string;
     const timeout = ((input.timeout as number) || 30) * 1000;
 
-    // Skill-aware intercept (see SKILL_PREFIX comment near top).
-    const inv = parseSkillInvocation(command);
-    if (inv) {
-      const decision = checkCapability(inv.slug, inv.capability);
-      if (!decision.allowed) {
-        return [
-          `[capability denied]`,
-          `skill: ${inv.slug}`,
-          `capability: ${inv.capability}`,
-          `reason: ${decision.reason ?? 'unknown'}`,
-          ``,
-          `Pick a different action, or ask the user to run:`,
-          `  yome skill perms ${inv.slug} --grant=${inv.capability}`,
-        ].join('\n');
-      }
-      // Allowed — strip the prefix and run the underlying command.
-      command = inv.shellCommand;
+    // Try the yome kernel first.
+    const k = await tryKernel(command);
+    if (k.handled) {
+      return formatOutput(k.stdout, k.stderr, k.exitCode);
     }
 
-    const { stdout, stderr, exitCode } = await runCommand(command, timeout);
-
-    if (exitCode === 0) {
-      const result = stdout.trim();
-      if (result.length > MAX_OUTPUT) {
-        return result.slice(0, MAX_OUTPUT) + `\n\n[Output truncated at ${MAX_OUTPUT} chars]`;
-      }
-      return result || '(no output)';
-    }
-
-    const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
-    return `Exit code: ${exitCode}\n${output}`;
+    // Otherwise, real shell.
+    const { stdout, stderr, exitCode } = await runShell(command, timeout);
+    return formatOutput(stdout, stderr, exitCode);
   },
 };

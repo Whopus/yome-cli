@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+// Spinner — uses the shared frame driver in animation.ts.
+//
+// Single global setInterval ticks every animated component in lock step,
+// so 100 spinners + 1 shimmer cost the same as 1 spinner.
+
+import React from 'react';
 import { Text } from 'ink';
+import { useFrame } from './animation.js';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 export function Spinner({ color = 'cyan' }: { color?: string }) {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setFrame((prev) => (prev + 1) % FRAMES.length);
-    }, 80);
-    return () => clearInterval(timer);
-  }, []);
-  return <Text color={color}>{FRAMES[frame]}</Text>;
+  const frame = useFrame();
+  return <Text color={color}>{FRAMES[frame % FRAMES.length]}</Text>;
 }

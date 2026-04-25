@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, Static } from 'ink';
 import { Markdown } from './Markdown.js';
 import { ToolResult } from './ToolResult.js';
 import { Spinner } from './Spinner.js';
@@ -13,6 +13,8 @@ export interface Message {
   toolSummary?: string;
   toolLabel?: string;
   done?: boolean;
+  /** Stable monotonic id assigned at push time. Required for <Static> keys. */
+  id?: number;
 }
 
 export function getToolLabel(name: string): string {
@@ -39,7 +41,12 @@ export function getToolDetail(name: string, input: Record<string, unknown>): str
   return JSON.stringify(input).slice(0, 60);
 }
 
-function MessageItem({ msg }: { msg: Message }) {
+// ── Performance: memoized item renderer ──────────────────────────────
+//
+// Without memo, every streamText delta forces every historical row to
+// re-render. Memo + stable props (msg ref unchanged once pushed) means
+// React skips reconciling the bulk of the tree on each token.
+const MessageItem = React.memo(function MessageItem({ msg }: { msg: Message }): React.ReactElement | null {
   switch (msg.type) {
     case 'user':
       return (
@@ -57,7 +64,7 @@ function MessageItem({ msg }: { msg: Message }) {
 
     case 'tool_start':
       return (
-        <Box flexDirection="column" marginTop={0}>
+        <Box flexDirection="column" marginTop={1}>
           <Box>
             <Text>{'  '}</Text>
             {!msg.done && <Spinner color="#E87B35" />}
@@ -88,7 +95,13 @@ function MessageItem({ msg }: { msg: Message }) {
     default:
       return null;
   }
-}
+}, (prev, next) => {
+  // Messages are immutable once pushed (we replace, not mutate). So
+  // reference equality is a safe shortcut. The only mutating field is
+  // `done` on tool_start when a result lands — that produces a NEW
+  // object via spread, so ref check still catches it.
+  return prev.msg === next.msg;
+});
 
 interface MessageListProps {
   messages: Message[];
@@ -96,11 +109,63 @@ interface MessageListProps {
   isRunning: boolean;
 }
 
-export function MessageList({ messages, streamText, isRunning }: MessageListProps) {
+// ── Static + live split ──────────────────────────────────────────────
+//
+// Strategy mirrors what Claude Code does with Ink:
+//   - Completed messages go into <Static>. Ink renders them ONCE and
+//     never re-renders them — they're committed to the scrollback
+//     buffer above the live region. This is the single biggest win
+//     for long sessions.
+//   - The bottom "live" region (currently-streaming text + spinners)
+//     re-renders every token, but it's small and bounded.
+//
+// A message is considered "stable" when it's not the tail of an open
+// tool_start chain and there's no streaming text mutating below it.
+// In practice we mark every message stable except the last `tool_start`
+// without a paired result — those still flicker their spinner.
+//
+// To keep <Static> keys stable across renders we assign each message an
+// `id` at push time (App.tsx). If an older message's `done` flag flips
+// from false→true we want it to leave the live region and re-mount in
+// Static cleanly, so we partition every render.
+function partitionMessages(messages: Message[]): { staticMsgs: Message[]; liveMsgs: Message[] } {
+  // A message is "live" if it's a tool_start that hasn't completed yet.
+  // Everything else (including tool_result, text, user, error) is stable
+  // and can be committed to <Static>.
+  //
+  // We also keep the very last message in the live region so its initial
+  // mount animation (e.g. a final assistant text) doesn't get suppressed
+  // by Static's "render once" semantics on the first frame.
+  const staticMsgs: Message[] = [];
+  const liveMsgs: Message[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    const isOpenTool = m.type === 'tool_start' && !m.done;
+    if (isOpenTool) {
+      liveMsgs.push(m);
+    } else {
+      staticMsgs.push(m);
+    }
+  }
+  return { staticMsgs, liveMsgs };
+}
+
+export const MessageList = React.memo(function MessageList({ messages, streamText, isRunning }: MessageListProps) {
+  const { staticMsgs, liveMsgs } = partitionMessages(messages);
+
   return (
     <>
-      {messages.map((msg, i) => (
-        <MessageItem key={i} msg={msg} />
+      {/* Frozen scrollback — rendered once per message, never re-diffed. */}
+      <Static items={staticMsgs}>
+        {(msg) => (
+          <MessageItem key={msg.id ?? `m-${msg.content.slice(0, 16)}`} msg={msg} />
+        )}
+      </Static>
+
+      {/* Live region — currently-running tools + streaming text. */}
+      {liveMsgs.map((msg) => (
+        <MessageItem key={msg.id ?? `live-${msg.toolName}`} msg={msg} />
       ))}
 
       {streamText && (
@@ -109,7 +174,7 @@ export function MessageList({ messages, streamText, isRunning }: MessageListProp
         </Box>
       )}
 
-      {isRunning && !streamText && (
+      {isRunning && !streamText && liveMsgs.length === 0 && (
         <Box marginTop={1} marginLeft={2}>
           <Spinner />
           <Text dimColor>{' Thinking\u2026'}</Text>
@@ -117,4 +182,4 @@ export function MessageList({ messages, streamText, isRunning }: MessageListProp
       )}
     </>
   );
-}
+});
