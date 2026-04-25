@@ -33,7 +33,7 @@ export function ModelPicker({ models, currentModel, onSelect, onCancel }: ModelP
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
         <Box marginBottom={1}>
-          <Text bold color="yellow">Model</Text>
+          <Text bold color="#E87B35">Model</Text>
         </Box>
         <Text dimColor>
           {'No models configured.\n\nAdd models to ~/.yome/settings.json:\n'}
@@ -83,7 +83,7 @@ export function ModelPicker({ models, currentModel, onSelect, onCancel }: ModelP
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} paddingY={0}>
       <Box marginBottom={1}>
-        <Text bold color="yellow">Model</Text>
+        <Text bold color="#E87B35">Model</Text>
         <Text dimColor> {'\u2014'} {'\u2191\u2193'} navigate, Enter select, Esc cancel</Text>
       </Box>
 
@@ -99,14 +99,14 @@ export function ModelPicker({ models, currentModel, onSelect, onCancel }: ModelP
         const isActive = entry.model === currentModel || entry.id === currentModel;
         const pointer = isFocused ? '\u276F' : ' ';
         const padded = entry.displayName.padEnd(maxNameLen + 2);
-        const nameColor = isActive ? 'green' : isFocused ? 'cyan' : undefined;
+        const nameColor = isActive ? '#E87B35' : isFocused ? '#E87B35' : undefined;
 
         return (
           <Box key={`${entry.id}-${realIdx}`} flexDirection="column">
             <Box>
-              <Text color={isFocused ? 'cyan' : undefined}>{pointer} </Text>
+              <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
               <Text bold color={nameColor}>{padded}</Text>
-              {isActive && <Text color="green" dimColor>{' (active)  '}</Text>}
+              {isActive && <Text color="#E87B35" dimColor>{' (active)  '}</Text>}
               {!isActive && <Text>{'           '}</Text>}
               <Text dimColor>{shortUrl(entry.baseUrl)}</Text>
             </Box>

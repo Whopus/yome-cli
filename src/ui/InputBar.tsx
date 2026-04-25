@@ -24,12 +24,15 @@ const MAX_VISIBLE = 5;
 function getPermissionLabel(mode: PermissionMode): { text: string; color: string } {
   switch (mode) {
     case 'bypassPermissions':
+      // Red is preserved as a danger signal — overrides every prompt.
       return { text: 'Bypass - all commands allowed', color: '#FF6B6B' };
     case 'acceptEdits':
+      // Mid-orange: somewhere between safe and danger.
       return { text: 'Auto - edit and read-only commands', color: '#E7BD1F' };
     case 'default':
     default:
-      return { text: 'Default - ask before write operations', color: '#7EC8E3' };
+      // Brand orange for the safe / default mode (was cyan).
+      return { text: 'Default - ask before write operations', color: '#E87B35' };
   }
 }
 
@@ -113,12 +116,12 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
       </Box>
       {imageCount > 0 && (
         <Box paddingX={1}>
-          <Text color="green" bold>{`\u{1F4CE} ${imageCount} image${imageCount > 1 ? 's' : ''} attached`}</Text>
+          <Text color="#E87B35" bold>{`\u{1F4CE} ${imageCount} image${imageCount > 1 ? 's' : ''} attached`}</Text>
           <Text dimColor> (press Enter to send)</Text>
         </Box>
       )}
       <Box borderStyle="round" borderColor="gray" paddingX={1}>
-        <Text color="yellow">{`> `}</Text>
+        <Text color="#E87B35">{`> `}</Text>
         <TextInput
           value={value}
           onChange={handleChange}
@@ -139,7 +142,7 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
             const padded = ('/' + item.name).padEnd(maxNameLen + 3);
             return (
               <Box key={item.name}>
-                <Text color={isFocused ? 'cyan' : 'yellow'} bold={isFocused}>{padded}</Text>
+                <Text color={isFocused ? '#E87B35' : undefined} dimColor={!isFocused} bold={isFocused}>{padded}</Text>
                 <Text dimColor={!isFocused}>{item.description}</Text>
               </Box>
             );

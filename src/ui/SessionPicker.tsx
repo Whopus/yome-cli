@@ -65,7 +65,7 @@ export function SessionPicker({ sessions, onSelect, onCancel }: SessionPickerPro
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Box marginBottom={1}>
-        <Text bold color="yellow">Sessions</Text>
+        <Text bold color="#E87B35">Sessions</Text>
         <Text dimColor> {'\u2014'} {sessions.length} session{sessions.length !== 1 ? 's' : ''}, select to continue</Text>
       </Box>
 
@@ -85,8 +85,8 @@ export function SessionPicker({ sessions, onSelect, onCancel }: SessionPickerPro
         return (
           <Box key={s.sessionId} flexDirection="column">
             <Box>
-              <Text color={isFocused ? 'cyan' : undefined}>{pointer} </Text>
-              <Text bold color={isFocused ? 'cyan' : 'white'}>{titleText}</Text>
+              <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
+              <Text bold color={isFocused ? '#E87B35' : undefined}>{titleText}</Text>
             </Box>
             <Box>
               <Text>{'   '}</Text>

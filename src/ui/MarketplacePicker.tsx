@@ -210,7 +210,7 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
 
       {phase === 'done' && (
         <Box flexDirection="column">
-          <Text color="green">{'\u2713'} {statusMsg}</Text>
+          <Text color="#E87B35">{'\u2713'} {statusMsg}</Text>
           <Box marginTop={1}>
             <Text dimColor>Enter / Esc to close</Text>
           </Box>

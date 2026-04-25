@@ -35,13 +35,13 @@ export function PermissionPrompt({ toolName, message, detail, onAllow, onDeny, o
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="#E87B35" paddingX={1} marginTop={1}>
       {OPTIONS.map((opt, i) => {
         const isFocused = i === cursor;
         const pointer = isFocused ? '> ' : '  ';
         return (
           <Box key={opt.id}>
-            <Text color={isFocused ? 'yellow' : undefined} bold={isFocused}>{pointer}{opt.label}</Text>
+            <Text color={isFocused ? '#E87B35' : undefined} bold={isFocused}>{pointer}{opt.label}</Text>
           </Box>
         );
       })}

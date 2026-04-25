@@ -491,7 +491,7 @@ export function App({ config }: AppProps) {
 
       {messages.length > 0 && (
         <Box marginBottom={1} marginTop={1}>
-          <Text bold color="magenta">{'> '}</Text>
+          <Text bold color="#E87B35">{'> '}</Text>
           <Text bold>Yome</Text>
           <Text dimColor> v{version}</Text>
           {totalTokens > 0 && (

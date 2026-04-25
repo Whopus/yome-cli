@@ -44,7 +44,7 @@ function MessageItem({ msg }: { msg: Message }) {
     case 'user':
       return (
         <Box marginTop={1} borderStyle="single" borderLeft borderTop={false} borderBottom={false} borderRight={false} borderColor="#E87B35">
-          <Text backgroundColor="black" color="white" bold>{' ' + msg.content + ' '}</Text>
+          <Text backgroundColor="black" color="#E87B35" bold>{' ' + msg.content + ' '}</Text>
         </Box>
       );
 
@@ -60,8 +60,8 @@ function MessageItem({ msg }: { msg: Message }) {
         <Box flexDirection="column" marginTop={0}>
           <Box>
             <Text>{'  '}</Text>
-            {!msg.done && <Spinner color="cyan" />}
-            {msg.done && <Text color="green">{DOT}</Text>}
+            {!msg.done && <Spinner color="#E87B35" />}
+            {msg.done && <Text color="#E87B35">{DOT}</Text>}
             <Text> </Text>
             <Text bold>{msg.toolLabel}</Text>
           </Box>

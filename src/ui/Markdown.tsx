@@ -29,7 +29,7 @@ function InlineText({ text }: { text: string }): React.ReactElement {
   return (
     <Text>
       {segs.map((s, i) => {
-        if (s.code) return <Text key={i} color="cyan">{s.text}</Text>;
+        if (s.code) return <Text key={i} color="#E87B35">{s.text}</Text>;
         if (s.bold) return <Text key={i} bold>{s.text}</Text>;
         if (s.italic) return <Text key={i} italic>{s.text}</Text>;
         if (s.dim) return <Text key={i} dimColor strikethrough>{s.text}</Text>;

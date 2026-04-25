@@ -38,7 +38,7 @@ export function TogglePicker({ title, items, onToggle, onClose, emptyHint }: Tog
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
         <Box marginBottom={1}>
-          <Text bold color="yellow">{title}</Text>
+          <Text bold color="#E87B35">{title}</Text>
         </Box>
         <Text dimColor>{emptyHint}</Text>
         <Box marginTop={1}>
@@ -53,7 +53,7 @@ export function TogglePicker({ title, items, onToggle, onClose, emptyHint }: Tog
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
       <Box marginBottom={1}>
-        <Text bold color="yellow">{title}</Text>
+        <Text bold color="#E87B35">{title}</Text>
         <Text dimColor> {'\u2014'} Space/Enter toggle, Esc close</Text>
       </Box>
 
@@ -61,15 +61,15 @@ export function TogglePicker({ title, items, onToggle, onClose, emptyHint }: Tog
         const isFocused = i === cursor;
         const pointer = isFocused ? '\u276F' : ' ';
         const toggle = item.enabled ? '\u25C9' : '\u25CB';
-        const toggleColor = item.enabled ? 'green' : 'red';
+        const toggleColor = item.enabled ? '#E87B35' : 'gray';
         const padded = item.name.padEnd(maxNameLen + 2);
 
         return (
           <Box key={item.name} flexDirection="column">
             <Box>
-              <Text color={isFocused ? 'cyan' : undefined}>{pointer} </Text>
+              <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
               <Text color={toggleColor}>{toggle} </Text>
-              <Text bold color={isFocused ? 'cyan' : undefined}>{padded}</Text>
+              <Text bold color={isFocused ? '#E87B35' : undefined}>{padded}</Text>
               <Text dimColor={!isFocused}>{item.description}</Text>
               <Text dimColor> ({item.source})</Text>
             </Box>
