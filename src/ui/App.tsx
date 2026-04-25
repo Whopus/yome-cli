@@ -517,7 +517,7 @@ export function App({ config }: AppProps) {
       )}
 
       {showSkillsPicker && (
-        <Box marginTop={1}>
+        <Box marginTop={1} width="100%">
           <UnifiedSkillsPicker
             key={`unified-skills-${pickerVersion}`}
             skills={unifiedSkillsCache}
@@ -530,7 +530,7 @@ export function App({ config }: AppProps) {
       )}
 
       {showMarketplace && (
-        <Box marginTop={1}>
+        <Box marginTop={1} width="100%">
           <MarketplacePicker
             onClose={handleMarketplaceClose}
             onInstalled={handleMarketplaceInstalled}

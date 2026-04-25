@@ -118,16 +118,16 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
   }, [query, phase]);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width="100%">
       <Box marginBottom={1}>
-        <Text bold color="magenta">Plugins </Text>
+        <Text bold color="#E87B35">Plugins </Text>
         <Text dimColor>{'\u2014'} hub.yome.work</Text>
       </Box>
 
       {phase === 'search' && (
         <>
           <Box>
-            <Text color="yellow">{'> '}</Text>
+            <Text color="#E87B35">{'> '}</Text>
             <TextInput
               value={query}
               onChange={setQuery}
@@ -168,10 +168,10 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
               return (
                 <Box key={h.slug} flexDirection="column">
                   <Box>
-                    <Text color={focused ? 'cyan' : undefined}>{pointer} </Text>
-                    <Text bold color={focused ? 'cyan' : undefined}>{h.slug.padEnd(20)}</Text>
+                    <Text color={focused ? '#E87B35' : undefined}>{pointer} </Text>
+                    <Text bold color={focused ? '#E87B35' : undefined}>{h.slug.padEnd(20)}</Text>
                     <Text dimColor> v{h.latest_version ?? '?'} </Text>
-                    {h.is_official && <Text color="blue">[OFFICIAL] </Text>}
+                    {h.is_official && <Text color="#E87B35">[OFFICIAL] </Text>}
                     <Text dimColor>★{h.star_count} ↓{h.install_count}</Text>
                   </Box>
                   {focused && (
@@ -194,7 +194,7 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
 
       {phase === 'installing' && (
         <Box flexDirection="column">
-          <Text color="yellow">{statusMsg}</Text>
+          <Text color="#E87B35">{statusMsg}</Text>
         </Box>
       )}
 

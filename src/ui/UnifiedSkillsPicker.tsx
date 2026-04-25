@@ -65,9 +65,9 @@ export function UnifiedSkillsPicker({
   const hubCount = skills.filter((s) => s.kind === 'hub').length;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1} width="100%">
       <Box marginBottom={1}>
-        <Text bold color="yellow">Skills </Text>
+        <Text bold color="#E87B35">Skills </Text>
         <Text dimColor>
           {'\u2014'} {hubCount} hub · {promptCount} prompt
         </Text>
@@ -89,19 +89,17 @@ export function UnifiedSkillsPicker({
         const isFocused = i === cursor;
         const pointer = isFocused ? '\u276F' : ' ';
         const toggle = s.enabled ? '\u25C9' : '\u25CB';
-        const toggleColor = s.enabled ? 'green' : 'red';
+        const toggleColor = s.enabled ? '#E87B35' : 'gray';
         const namePadded = s.name.padEnd(maxNameLen + 2);
         const kindPadded = originLabel(s).padEnd(maxKindLen + 2);
-        const kindColor =
-          s.kind === 'hub' ? 'magenta' : s.promptOrigin?.startsWith('claude') ? 'blue' : 'cyan';
 
         return (
           <Box key={s.id} flexDirection="column">
             <Box>
-              <Text color={isFocused ? 'cyan' : undefined}>{pointer} </Text>
+              <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
               <Text color={toggleColor}>{toggle} </Text>
-              <Text bold color={isFocused ? 'cyan' : undefined}>{namePadded}</Text>
-              <Text color={kindColor} dimColor={!isFocused}>{kindPadded}</Text>
+              <Text bold color={isFocused ? '#E87B35' : undefined}>{namePadded}</Text>
+              <Text dimColor>{kindPadded}</Text>
               <Text dimColor>{s.description.slice(0, 60)}</Text>
             </Box>
             {isFocused && (
@@ -126,8 +124,8 @@ export function UnifiedSkillsPicker({
 
       <Box marginTop={1}>
         <Text dimColor>
-          {'\u2191\u2193'} nav {'  '} Space/Enter toggle {'  '} a add (hub) {'  '}
-          {focused?.kind === 'hub' ? 'u uninstall {  } ' : ''}
+          {'\u2191\u2193'} nav {'  '} Space/Enter toggle {'  '} a add (hub){'  '}
+          {focused?.kind === 'hub' ? 'u uninstall  ' : ''}
           Esc close
         </Text>
       </Box>
