@@ -169,9 +169,19 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
                 <Box key={h.slug} flexDirection="column">
                   <Box>
                     <Text color={focused ? '#E87B35' : undefined}>{pointer} </Text>
-                    <Text bold color={focused ? '#E87B35' : undefined}>{h.slug.padEnd(20)}</Text>
-                    <Text dimColor> v{h.latest_version ?? '?'} </Text>
-                    {h.is_official && <Text color="#E87B35">[OFFICIAL] </Text>}
+                    <Box width={22} flexShrink={0}>
+                      <Text bold color={focused ? '#E87B35' : undefined} wrap="truncate-end">
+                        {h.slug}
+                      </Text>
+                    </Box>
+                    <Box width={10} flexShrink={0}>
+                      <Text dimColor>v{h.latest_version ?? '?'}</Text>
+                    </Box>
+                    {h.is_official && (
+                      <Box width={11} flexShrink={0}>
+                        <Text color="#E87B35">[OFFICIAL]</Text>
+                      </Box>
+                    )}
                     <Text dimColor>★{h.star_count} ↓{h.install_count}</Text>
                   </Box>
                   {focused && (

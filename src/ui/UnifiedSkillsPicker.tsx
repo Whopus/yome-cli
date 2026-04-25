@@ -90,31 +90,51 @@ export function UnifiedSkillsPicker({
         const pointer = isFocused ? '\u276F' : ' ';
         const toggle = s.enabled ? '\u25C9' : '\u25CB';
         const toggleColor = s.enabled ? '#E87B35' : 'gray';
-        const namePadded = s.name.padEnd(maxNameLen + 2);
-        const kindPadded = originLabel(s).padEnd(maxKindLen + 2);
+
+        // Use ink's flex layout (fixed-width columns + wrap=truncate-end on
+        // the description) instead of string .padEnd. padEnd uses JS char
+        // count, which double-counts CJK glyphs (terminal renders them at
+        // 2 columns) and lets long descriptions wrap mid-row, breaking the
+        // grid alignment for hub skills (which often have CJK descriptions).
+        const nameColWidth = maxNameLen + 2;
+        const kindColWidth = maxKindLen + 2;
 
         return (
           <Box key={s.id} flexDirection="column">
             <Box>
               <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
               <Text color={toggleColor}>{toggle} </Text>
-              <Text bold color={isFocused ? '#E87B35' : undefined}>{namePadded}</Text>
-              <Text dimColor>{kindPadded}</Text>
-              <Text dimColor>{s.description.slice(0, 60)}</Text>
+              <Box width={nameColWidth} flexShrink={0}>
+                <Text bold color={isFocused ? '#E87B35' : undefined} wrap="truncate-end">
+                  {s.name}
+                </Text>
+              </Box>
+              <Box width={kindColWidth} flexShrink={0}>
+                <Text dimColor wrap="truncate-end">{originLabel(s)}</Text>
+              </Box>
+              <Box flexGrow={1}>
+                <Text dimColor wrap="truncate-end">{s.description}</Text>
+              </Box>
             </Box>
             {isFocused && (
               <Box marginLeft={6} flexDirection="column">
                 {s.kind === 'hub' && (
                   <>
-                    <Text dimColor>slug: {s.slug} · v{s.version} · domain {s.domain}</Text>
-                    {s.source && <Text dimColor>source: {s.source}</Text>}
+                    <Text dimColor wrap="truncate-end">
+                      slug: {s.slug} · v{s.version} · domain {s.domain}
+                    </Text>
+                    {s.source && (
+                      <Text dimColor wrap="truncate-end">source: {s.source}</Text>
+                    )}
                     {s.allowedCapabilities && s.allowedCapabilities.length > 0 && (
-                      <Text dimColor>caps: {s.allowedCapabilities.join(', ')}</Text>
+                      <Text dimColor wrap="truncate-end">
+                        caps: {s.allowedCapabilities.join(', ')}
+                      </Text>
                     )}
                   </>
                 )}
                 {s.kind === 'prompt' && (
-                  <Text dimColor>file: {s.installedAt}/SKILL.md</Text>
+                  <Text dimColor wrap="truncate-end">file: {s.installedAt}/SKILL.md</Text>
                 )}
               </Box>
             )}
