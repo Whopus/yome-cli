@@ -3,6 +3,8 @@ import { readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { loadAllSkills } from './skills/index.js';
 import type { Skill } from './skills/index.js';
+import { getInstalledFast } from './yomeSkills/skillsIndex.js';
+import { readManifest } from './yomeSkills/manifest.js';
 
 function safeExec(cmd: string, cwd: string): string | null {
   try {
@@ -87,22 +89,65 @@ You have these tools: Read, Edit, Write, Bash, Glob, Grep, LS.
 - Use LS to list directory contents.
 `;
 
+  // Prompt-style skills (Claude Code-format SKILL.md). The agent injects
+  // their markdown bodies into the prompt at /skill-name invocation time;
+  // here we just advertise them so the model knows they exist.
   const skills = loadAllSkills();
   if (skills.length > 0) {
     prompt += buildSkillsSection(skills);
+  }
+
+  // Hub skills (yome-skill.json packages) — these carry typed command
+  // contracts and capability grants. Every installed + enabled hub skill
+  // is exposed to the model so it can reach for the right command
+  // (e.g. ppt.slide.add) instead of trying to roll one from shell.
+  const hubSkills = getInstalledFast().filter((s) => s.status === 'enabled');
+  if (hubSkills.length > 0) {
+    prompt += buildHubSkillsSection(hubSkills);
   }
 
   return prompt;
 }
 
 function buildSkillsSection(skills: Skill[]): string {
-  let section = `\n## Available Skills\nThe user can invoke skills with \`/skill-name [args]\`. You can also invoke them when appropriate.\n\n`;
+  let section = `\n## Available Skills (prompt)\nThe user can invoke skills with \`/skill-name [args]\`. You can also invoke them when appropriate.\n\n`;
   for (const skill of skills) {
     section += `### /${skill.name}\n`;
     section += `${skill.description}\n`;
     if (skill.whenToUse) section += `When to use: ${skill.whenToUse}\n`;
     if (skill.argumentHint) section += `Usage: /${skill.name} ${skill.argumentHint}\n`;
     section += `Source: ${skill.source}\n\n`;
+  }
+  return section;
+}
+
+function buildHubSkillsSection(entries: ReturnType<typeof getInstalledFast>): string {
+  let section = `\n## Installed Hub Skills (yome-skill packages)
+These are typed command packages installed by the user via \`yome skill install ...\`.
+Each one provides a fixed contract of commands and the capabilities granted to it.
+Prefer calling these packaged commands over open-ended shell when the task fits one of them.
+
+`;
+  for (const e of entries) {
+    section += `### ${e.slug} — ${e.name ?? e.domain} v${e.version}\n`;
+    if (e.description) section += `${e.description}\n`;
+    // Pull command list from the manifest on disk; cheap (<5KB JSON).
+    const manifest = readManifest(e.installedAt);
+    const caps =
+      (e.allowed_capabilities && e.allowed_capabilities.length > 0)
+        ? e.allowed_capabilities
+        : (manifest?.capabilities ?? []);
+    if (caps.length > 0) {
+      section += `Capabilities: ${caps.join(', ')}\n`;
+    }
+    if (manifest && Array.isArray(manifest.commands) && manifest.commands.length > 0) {
+      section += `Commands:\n`;
+      for (const c of manifest.commands as Array<{ action?: string; desc?: string }>) {
+        if (!c.action) continue;
+        section += `  - ${e.domain}.${c.action}` + (c.desc ? ` — ${c.desc}` : '') + `\n`;
+      }
+    }
+    section += `Installed at: ${e.installedAt}\n\n`;
   }
   return section;
 }
