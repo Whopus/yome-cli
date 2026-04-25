@@ -15,7 +15,7 @@
 
 ---
 
-Yome Agent 不是又一个 chat agent。它是 [Yome](https://yome.ai) 的开源底盘 —— 一台把 LLM、你的设备、你机器上的原生 app 编织成统一运行环境的 **Empower Kernel**。
+Yome Agent 不是又一个 chat agent。它是 [Yome](https://yome.work) 的开源底盘 —— 一台把 LLM、你的设备、你机器上的原生 app 编织成统一运行环境的 **Empower Kernel**。
 
 模型已经很强了。它住在你 12 个 context 之外的某处。今天你是 context 与 tool 之间的 router; 80% 的工作日花在搬运而不是创造。Yome Agent 的存在是为了把这层路由职责从你手里拿走 —— 不是再造一个工具,而是让你已有的工具醒来。
 

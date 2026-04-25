@@ -6,7 +6,7 @@
 
 ### The Empower Kernel
 
-*Agentic context. Agentic native skills. Agentic Bash kernel.*
+*Agentic context, native skills, bash kernel.*
 *The open-source substrate that makes AI feel and know you.*
 
 [English](./README.md) · [简体中文](./README.zh-CN.md)
@@ -15,7 +15,7 @@
 
 ---
 
-Yome Agent is not yet another chat agent. It is the open-source substrate of [Yome](https://yome.ai) — an **Empower Kernel** that weaves the LLM, your devices and your native apps into one runtime.
+Yome Agent is not yet another chat agent. It is the open-source substrate of [Yome](https://yome.work) — an **Empower Kernel** that weaves the LLM, your devices and your native apps into one runtime.
 
 The model is strong. It lives nowhere near your twelve context silos. Today you are the router between context and tool; 80% of your workday is spent shuffling, not creating. Yome Agent exists to take that routing job away from you — not by inventing one more tool, but by waking up the tools you already own.
 
