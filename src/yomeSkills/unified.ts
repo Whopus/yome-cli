@@ -1,14 +1,15 @@
 // cli/src/yomeSkills/unified.ts
 //
 // Unified skill view across the two skill systems Yome supports:
-//   1. Prompt skills (Claude Code-compatible markdown)
+//   1. Prompt skills (Claude Code-compatible SKILL.md FORMAT)
 //      - SKILL.md with optional YAML frontmatter
 //      - The body is dropped into the agent prompt when triggered
-//      - Discovered under 4 roots:
+//      - Discovered under 2 roots (yome's own dirs, NOT ~/.claude):
 //          ~/.yome/skills/<name>/SKILL.md       (yome global)
 //          <cwd>/.yome/skills/<name>/SKILL.md   (yome project)
-//          ~/.claude/skills/<name>/SKILL.md     (claude global)
-//          <cwd>/.claude/skills/<name>/SKILL.md (claude project)
+//      - We support the FORMAT (so users can drop a Claude SKILL.md
+//        unchanged into our directories) but we don't read Claude's own
+//        directories — those belong to Claude Code, not us.
 //   2. Hub skills (yome-skill.json — typed command packages)
 //      - Discovered under ~/.yome/skills/<owner>/<name>/yome-skill.json
 //      - Carry capability grants, backends, signature contracts

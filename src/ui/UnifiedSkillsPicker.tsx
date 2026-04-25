@@ -102,8 +102,10 @@ export function UnifiedSkillsPicker({
         return (
           <Box key={s.id} flexDirection="column">
             <Box>
-              <Text color={isFocused ? '#E87B35' : undefined}>{pointer} </Text>
-              <Text color={toggleColor}>{toggle} </Text>
+              <Text color={isFocused ? '#E87B35' : undefined}>{pointer}</Text>
+              <Text>{'   '}</Text>
+              <Text color={toggleColor}>{toggle}</Text>
+              <Text>{'  '}</Text>
               <Box width={nameColWidth} flexShrink={0}>
                 <Text bold color={isFocused ? '#E87B35' : undefined} wrap="truncate-end">
                   {s.name}
@@ -117,7 +119,7 @@ export function UnifiedSkillsPicker({
               </Box>
             </Box>
             {isFocused && (
-              <Box marginLeft={6} flexDirection="column">
+              <Box marginLeft={7} flexDirection="column">
                 {s.kind === 'hub' && (
                   <>
                     <Text dimColor wrap="truncate-end">
