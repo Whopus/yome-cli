@@ -87,7 +87,11 @@ export function UnifiedSkillsPicker({
 
       {skills.map((s, i) => {
         const isFocused = i === cursor;
-        const pointer = isFocused ? '\u276F' : ' ';
+        // ASCII '>' is single-column on every terminal — '\u276F' (❯) gets
+        // rendered double-wide on macOS Terminal/iTerm, which shifted the
+        // focused row 1 cell to the right and broke alignment with the
+        // unfocused rows. Wrap pointer in a fixed-width Box so the slot
+        // takes the same space whether focused or not.
         const toggle = s.enabled ? '\u25C9' : '\u25CB';
         const toggleColor = s.enabled ? '#E87B35' : 'gray';
 
@@ -102,8 +106,12 @@ export function UnifiedSkillsPicker({
         return (
           <Box key={s.id} flexDirection="column">
             <Box>
-              <Text color={isFocused ? '#E87B35' : undefined}>{pointer}</Text>
-              <Text>{'   '}</Text>
+              <Box width={2} flexShrink={0}>
+                <Text color={isFocused ? '#E87B35' : undefined} bold={isFocused}>
+                  {isFocused ? '>' : ' '}
+                </Text>
+              </Box>
+              <Text>{'  '}</Text>
               <Text color={toggleColor}>{toggle}</Text>
               <Text>{'  '}</Text>
               <Box width={nameColWidth} flexShrink={0}>

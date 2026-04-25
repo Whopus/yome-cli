@@ -164,11 +164,15 @@ export function MarketplacePicker({ onClose, onInstalled }: MarketplacePickerPro
           <Box flexDirection="column" marginTop={1}>
             {hits.map((h, i) => {
               const focused = i === cursor;
-              const pointer = focused ? '\u276F' : ' ';
               return (
                 <Box key={h.slug} flexDirection="column">
                   <Box>
-                    <Text color={focused ? '#E87B35' : undefined}>{pointer} </Text>
+                    <Box width={2} flexShrink={0}>
+                      <Text color={focused ? '#E87B35' : undefined} bold={focused}>
+                        {focused ? '>' : ' '}
+                      </Text>
+                    </Box>
+                    <Text>{' '}</Text>
                     <Box width={22} flexShrink={0}>
                       <Text bold color={focused ? '#E87B35' : undefined} wrap="truncate-end">
                         {h.slug}
