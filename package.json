@@ -1,7 +1,7 @@
 {
   "name": "@poping/yome",
   "version": "0.0.2",
-  "description": "Yome CLI — AI coding agent",
+  "description": "Yome Agent — the open-source Empower Kernel CLI",
   "type": "module",
   "bin": {
     "yome": "bin/yome.js"

@@ -2,7 +2,7 @@
 
 <img src=".assets/yome-icon.png" width="120" alt="Yome" />
 
-# YOME CLI
+# YOME AGENT
 
 ### The Empower Kernel
 
@@ -15,9 +15,9 @@
 
 ---
 
-Yome CLI is not yet another chat agent. It is the open-source substrate of [Yome](https://yome.ai) — an **Empower Kernel** that weaves the LLM, your devices and your native apps into one runtime.
+Yome Agent is not yet another chat agent. It is the open-source substrate of [Yome](https://yome.ai) — an **Empower Kernel** that weaves the LLM, your devices and your native apps into one runtime.
 
-The model is strong. It lives nowhere near your twelve context silos. Today you are the router between context and tool; 80% of your workday is spent shuffling, not creating. Yome CLI exists to take that routing job away from you — not by inventing one more tool, but by waking up the tools you already own.
+The model is strong. It lives nowhere near your twelve context silos. Today you are the router between context and tool; 80% of your workday is spent shuffling, not creating. Yome Agent exists to take that routing job away from you — not by inventing one more tool, but by waking up the tools you already own.
 
 ---
 
@@ -51,7 +51,7 @@ The model issues real `ppt new ~/Desktop/q3.pptx` → `ppt title 1 --text="Q3 Re
 
 ## The Three Engines
 
-Yome CLI is composed of three engines, each independent yet interlocking. Each is a piece of ground truth from the *Agentic Empower Intelligence* blueprint in the Yome business plan.
+Yome Agent is composed of three engines, each independent yet interlocking. Each is a piece of ground truth from the *Agentic Empower Intelligence* blueprint in the Yome business plan.
 
 ---
 
@@ -59,7 +59,7 @@ Yome CLI is composed of three engines, each independent yet interlocking. Each i
 
 > Context is not a static string. It is a *living continuum*.
 
-The agent loop must not live only in the 30 seconds after you press Enter. It should be always-on, never-forget, ambient. This is the dimension that separates Yome CLI from traditional chat-style coding agents.
+The agent loop must not live only in the 30 seconds after you press Enter. It should be always-on, never-forget, ambient. This is the dimension that separates Yome Agent from traditional chat-style coding agents.
 
 | Capability | Meaning |
 |---|---|
