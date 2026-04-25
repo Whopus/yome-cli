@@ -22,6 +22,10 @@ function listChildDirs(dir: string): string[] {
   if (!existsSync(dir)) return [];
   try {
     return readdirSync(dir).filter((n) => {
+      // Skip rollback snapshots — install.ts moves the previous version
+      // sideways to <slug>.previous before overwriting. They have a valid
+      // yome-skill.json so they'd otherwise look like a duplicate install.
+      if (n.endsWith('.previous')) return false;
       try { return statSync(join(dir, n)).isDirectory(); } catch { return false; }
     });
   } catch {

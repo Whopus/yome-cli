@@ -15,6 +15,11 @@ import { ModelPicker } from './ModelPicker.js';
 import { SessionPicker } from './SessionPicker.js';
 import { PermissionPrompt } from './PermissionPrompt.js';
 import { TogglePicker } from './TogglePicker.js';
+import { UnifiedSkillsPicker } from './UnifiedSkillsPicker.js';
+import { MarketplacePicker } from './MarketplacePicker.js';
+import { listAllUnified, type UnifiedSkill } from '../yomeSkills/unified.js';
+import { uninstallBySlug } from '../yomeSkills/uninstall.js';
+import { setSkillEnabled } from '../yomeSkills/enable.js';
 import { listSessions } from '../sessions.js';
 import type { ToggleItem } from './TogglePicker.js';
 import type { Message } from './MessageList.js';
@@ -39,6 +44,8 @@ export function App({ config }: AppProps) {
   const [showSkillsPicker, setShowSkillsPicker] = useState(false);
   const [showAgentsPicker, setShowAgentsPicker] = useState(false);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [showMarketplace, setShowMarketplace] = useState(false);
+  const [unifiedSkillsCache, setUnifiedSkillsCache] = useState<UnifiedSkill[]>([]);
   const [currentModelDisplay, setCurrentModelDisplay] = useState<string | undefined>(config.model);
   const [pendingPermission, setPendingPermission] = useState<{
     toolName: string;
@@ -89,10 +96,53 @@ export function App({ config }: AppProps) {
         return;
       }
 
-      // /skills — interactive toggle picker
+      // /skills — unified picker (prompt skills + hub skills together)
       if (prompt === '/skills') {
+        setUnifiedSkillsCache(listAllUnified(true));
         setShowSkillsPicker(true);
         setPickerVersion((v) => v + 1);
+        return;
+      }
+
+      // /plugins — open the hub marketplace (search + install)
+      if (prompt === '/plugins' || prompt === '/marketplace') {
+        setShowMarketplace(true);
+        return;
+      }
+
+      // /skill <subcommand> — inline non-interactive CLI subcommands.
+      // Lets users install/uninstall/list without leaving the chat.
+      // Examples:
+      //   /skill install github:owner/repo
+      //   /skill list
+      //   /skill uninstall @yome/ppt
+      if (prompt.startsWith('/skill ') || prompt === '/skill') {
+        const argsText = prompt.replace(/^\/skill\s*/, '').trim();
+        if (argsText.length === 0) {
+          setMessages((prev) => [...prev, {
+            type: 'text',
+            content: 'Usage: `/skill <subcommand>` — try `install github:owner/repo`, `list`, `uninstall <slug>`, or open `/skills` for the picker.',
+          }]);
+          return;
+        }
+        const argv = argsText.split(/\s+/);
+        const { runSkillSubcommand } = await import('../yomeSkills/cli.js');
+        // Capture stdout/stderr so the chat shows what would have printed.
+        const captured: string[] = [];
+        const origLog = console.log;
+        const origErr = console.error;
+        console.log = (...a: unknown[]) => captured.push(a.map(String).join(' '));
+        console.error = (...a: unknown[]) => captured.push(a.map(String).join(' '));
+        try {
+          await runSkillSubcommand(argv, { yes: true, skipVerify: true });
+        } finally {
+          console.log = origLog;
+          console.error = origErr;
+        }
+        const out = captured.join('\n').trim() || '(no output)';
+        setMessages((prev) => [...prev, { type: 'text', content: '```\n' + out + '\n```' }]);
+        // Refresh the cache so a follow-up /skills sees the result.
+        setUnifiedSkillsCache(listAllUnified(true));
         return;
       }
 
@@ -330,12 +380,68 @@ export function App({ config }: AppProps) {
     setMessages((prev) => [...prev, { type: 'text', content: `Agent **${name}** ${status}.` }]);
   }, []);
 
+  // ── Unified /skills handlers ──────────────────────────────────
+  const refreshUnifiedSkills = useCallback(() => {
+    setUnifiedSkillsCache(listAllUnified(true));
+    setPickerVersion((v) => v + 1);
+  }, []);
+
+  const handleUnifiedToggle = useCallback((s: UnifiedSkill) => {
+    if (s.kind === 'prompt') {
+      const nowEnabled = toggleSkill(s.name);
+      setMessages((prev) => [...prev, {
+        type: 'text',
+        content: `Skill **${s.name}** ${nowEnabled ? 'enabled' : 'disabled'}.`,
+      }]);
+    } else {
+      // hub: enabled = currently enabled; we want the opposite
+      const r = setSkillEnabled(s.slug!, !s.enabled);
+      if (!r.ok) {
+        setMessages((prev) => [...prev, { type: 'error', content: r.reason ?? 'toggle failed' }]);
+        return;
+      }
+      setMessages((prev) => [...prev, {
+        type: 'text',
+        content: `Hub skill **${s.slug}** ${!s.enabled ? 'enabled' : 'disabled'}.`,
+      }]);
+    }
+    refreshUnifiedSkills();
+  }, [refreshUnifiedSkills]);
+
+  const handleUnifiedUninstall = useCallback((s: UnifiedSkill) => {
+    if (s.kind !== 'hub' || !s.slug) return;
+    const r = uninstallBySlug(s.slug);
+    if (!r.ok) {
+      setMessages((prev) => [...prev, { type: 'error', content: r.reason ?? 'uninstall failed' }]);
+      return;
+    }
+    setMessages((prev) => [...prev, { type: 'text', content: `Removed hub skill **${s.slug}**.` }]);
+    refreshUnifiedSkills();
+  }, [refreshUnifiedSkills]);
+
+  const handleAddFromMarketplace = useCallback(() => {
+    setShowSkillsPicker(false);
+    setShowMarketplace(true);
+  }, []);
+
+  const handleMarketplaceClose = useCallback(() => {
+    setShowMarketplace(false);
+    refreshUnifiedSkills();
+  }, [refreshUnifiedSkills]);
+
+  const handleMarketplaceInstalled = useCallback((slug: string) => {
+    setMessages((prev) => [...prev, {
+      type: 'text',
+      content: `Installed hub skill **${slug}** from marketplace.`,
+    }]);
+  }, []);
+
   useEffect(() => {
     const initialPrompt = (config as any).__initialPrompt;
     if (initialPrompt) handleSubmit(initialPrompt);
   }, []);
 
-  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || showSessionPicker || pendingPermission !== null;
+  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || showSessionPicker || showMarketplace || pendingPermission !== null;
 
   const PERMISSION_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
@@ -365,7 +471,9 @@ export function App({ config }: AppProps) {
       { name: 'login', description: 'Mock login command (for demonstration)' },
       { name: 'sessions', description: 'Browse and continue previous sessions' },
       { name: 'model', description: 'Switch model' },
-      { name: 'skills', description: 'Manage skills (enable/disable)' },
+      { name: 'skills', description: 'Manage installed skills (prompt + hub)' },
+      { name: 'plugins', description: 'Browse the hub marketplace and install skills' },
+      { name: 'skill', description: 'Inline skill subcommand: install / list / uninstall …' },
       { name: 'subagents', description: 'Manage subagents (enable/disable)' },
       { name: 'agent', description: 'Switch agent loop mode' },
     ];
@@ -410,13 +518,22 @@ export function App({ config }: AppProps) {
 
       {showSkillsPicker && (
         <Box marginTop={1}>
-          <TogglePicker
-            key={`skills-${pickerVersion}`}
-            title="Skills"
-            items={buildSkillItems()}
-            onToggle={handleSkillToggle}
+          <UnifiedSkillsPicker
+            key={`unified-skills-${pickerVersion}`}
+            skills={unifiedSkillsCache}
+            onToggle={handleUnifiedToggle}
+            onUninstall={handleUnifiedUninstall}
+            onAdd={handleAddFromMarketplace}
             onClose={() => setShowSkillsPicker(false)}
-            emptyHint={'No skills found.\n\nCreate skills in:\n  ~/.yome/skills/<name>/SKILL.md  (user)\n  .yome/skills/<name>/SKILL.md   (project)'}
+          />
+        </Box>
+      )}
+
+      {showMarketplace && (
+        <Box marginTop={1}>
+          <MarketplacePicker
+            onClose={handleMarketplaceClose}
+            onInstalled={handleMarketplaceInstalled}
           />
         </Box>
       )}

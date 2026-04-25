@@ -73,6 +73,7 @@ const cli = meow(
       yes: { type: 'boolean', shortFlag: 'y' },
       grant: { type: 'string' },
       revoke: { type: 'string' },
+      skipVerify: { type: 'boolean' },
     },
   },
 );
@@ -87,6 +88,7 @@ if (cli.input[0] === 'skill') {
     yes: !!cli.flags.yes,
     grant: cli.flags.grant,
     revoke: cli.flags.revoke,
+    skipVerify: !!cli.flags.skipVerify,
   });
   process.exit(exit);
 }

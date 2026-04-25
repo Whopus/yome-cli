@@ -35,6 +35,8 @@ export interface SkillCliFlags {
   revoke?: string;
   /** --grant <cap>: capability to grant (yome skill perms). */
   grant?: string;
+  /** --skip-verify: bypass post-install sha256 check. Only for dev. */
+  skipVerify?: boolean;
 }
 
 export async function runSkillSubcommand(args: string[], flags: SkillCliFlags): Promise<number> {
@@ -153,7 +155,12 @@ async function doInstall(args: string[], flags: SkillCliFlags): Promise<number> 
     console.error('  or https://github.com/owner/repo[/tree/<ref>/<subpath>]');
     return 2;
   }
-  const installOpts = { force: flags.force, verbose: flags.verbose, yes: flags.yes };
+  const installOpts = {
+    force: flags.force,
+    verbose: flags.verbose,
+    yes: flags.yes,
+    skipVerify: flags.skipVerify,
+  };
   const result = isGithubSource(source)
     ? await installFromGithub(source, installOpts)
     : await installFromLocal(source, installOpts);
