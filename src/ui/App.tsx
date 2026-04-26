@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Static, Text, useApp, useInput } from 'ink';
 import { Agent } from '../agent.js';
 import { getVersion, loadModelEntries } from '../config.js';
 import type { ModelEntry } from '../config.js';
@@ -535,7 +535,12 @@ export function App({ config }: AppProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {!showAgentPicker && <Banner />}
+      {/*
+        Banner is rendered INSIDE MessageList's <Static> as its first
+        item, so Ink commits it to scrollback right after the user's
+        `yome` command line and never moves it again. Real messages
+        are appended below it in the same Static stream.
+      */}
 
       {messages.length > 0 && (
         <Box marginBottom={1} marginTop={1}>

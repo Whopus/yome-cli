@@ -3,6 +3,14 @@ import { Box, Text, Static } from 'ink';
 import { Markdown } from './Markdown.js';
 import { ToolResult } from './ToolResult.js';
 import { Spinner } from './Spinner.js';
+import { Banner } from './Banner.js';
+
+// Sentinel: a synthetic "banner" item we inject as element 0 of the
+// Static stream so the YOME logo gets committed to scrollback BEFORE
+// any real message and never moves afterward. We tag it with a unique
+// id well outside the regular message id range so partitionMessages
+// can never collide.
+type StaticItem = Message | { __banner: true; id: -1 };
 
 const DOT = process.platform === 'darwin' ? '\u23FA' : '\u25CF';
 
@@ -154,13 +162,27 @@ function partitionMessages(messages: Message[]): { staticMsgs: Message[]; liveMs
 export const MessageList = React.memo(function MessageList({ messages, streamText, isRunning }: MessageListProps) {
   const { staticMsgs, liveMsgs } = partitionMessages(messages);
 
+  // Banner is item #0 of the Static stream, so Ink commits it to the
+  // terminal once at boot — right after the user's `yome` command line
+  // — and it stays anchored at that scrollback position forever. Every
+  // real message is appended below it.
+  const staticItems: StaticItem[] = React.useMemo(
+    () => [{ __banner: true, id: -1 } as const, ...staticMsgs],
+    [staticMsgs],
+  );
+
   return (
     <>
-      {/* Frozen scrollback — rendered once per message, never re-diffed. */}
-      <Static items={staticMsgs}>
-        {(msg) => (
-          <MessageItem key={msg.id ?? `m-${msg.content.slice(0, 16)}`} msg={msg} />
-        )}
+      {/* Frozen scrollback — banner first, then completed messages. */}
+      <Static items={staticItems}>
+        {(item) => {
+          if ('__banner' in item) {
+            return <Banner key="banner" />;
+          }
+          return (
+            <MessageItem key={item.id ?? `m-${item.content.slice(0, 16)}`} msg={item} />
+          );
+        }}
       </Static>
 
       {/* Live region — currently-running tools + streaming text. */}

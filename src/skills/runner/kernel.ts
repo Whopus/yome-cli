@@ -22,7 +22,7 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { tokenize, looksCompound } from './tokenizer.js';
+import { tokenize, looksCompound, splitOnUnquotedAmpAmp } from './tokenizer.js';
 import { getInstalledFast, type SkillIndexEntry } from '../../yomeSkills/skillsIndex.js';
 import { readManifest } from '../../yomeSkills/manifest.js';
 import { invokeSkill } from '../../yomeSkills/invoke.js';
@@ -83,6 +83,19 @@ export async function tryKernel(commandLine: string): Promise<KernelResult> {
 
   const batch = parseBatchCommand(trimmed);
   if (batch) return runBatch(batch);
+
+  // ── `xl X && xl Y && ...` chains ───────────────────────────────
+  // If a line is ONLY composed of hub-skill invocations joined by
+  // top-level `&&`, the kernel runs them sequentially with short-circuit
+  // semantics rather than handing the whole compound line to /bin/sh
+  // (which would just say "xl: command not found"). Anything that's
+  // not a pure skill chain (mixed shell + skill, presence of `|`/`;`/
+  // redirect/subshell, unknown domains, --help mid-chain) falls through
+  // to looksCompound below and out to real shell.
+  if (trimmed.includes('&&')) {
+    const chainResult = await tryRunSkillChain(trimmed);
+    if (chainResult) return chainResult;
+  }
 
   // Compound shell stays shell.
   if (looksCompound(trimmed)) return notHandled();
@@ -151,6 +164,76 @@ export async function tryKernel(commandLine: string): Promise<KernelResult> {
     stdout: r.stdout,
     stderr: r.stderr,
     exitCode: r.exitCode,
+  };
+}
+
+// ── `<domain> X && <domain> Y && ...` chain runner ───────────────────
+//
+// Returns:
+//   - null  → not a pure skill chain (caller should keep going / fall to shell)
+//   - KernelResult → kernel handled the whole chain
+//
+// Acceptance criteria for "pure skill chain":
+//   * line splits on top-level `&&` into >= 2 segments
+//   * every segment, after tokenize+trim, starts with a token that maps
+//     to an installed+enabled hub-skill domain
+//   * no segment is a meta-action we can't safely chain (batch/help/--doc) —
+//     those would interact with the chain in surprising ways, so we let
+//     real shell handle them (exits 127, but only if user really wrote
+//     `xl --help && xl batch ...` which is nonsensical anyway)
+//
+// Execution semantics: bash-like `&&` short-circuit. Stop on first
+// non-zero exit; return that exit code. Stdout is the concatenation of
+// each successful segment's stdout; stderr is the failing segment's
+// stderr (mirroring `bash -c 'a && b && c'`).
+async function tryRunSkillChain(line: string): Promise<KernelResult | null> {
+  const segments = splitOnUnquotedAmpAmp(line);
+  if (segments.length < 2) return null;
+
+  const installed = getInstalledFast().filter((s) => s.status === 'enabled');
+  const domains = new Set(installed.map((s) => s.domain));
+
+  // Pre-flight: every segment must (a) tokenize to >= 1 token, (b) lead
+  // with a known skill domain, (c) NOT be a meta-action.
+  for (const seg of segments) {
+    if (looksCompound(seg)) return null; // segment itself has |/;/redirect
+    const toks = tokenize(seg);
+    if (toks.length === 0) return null;
+    const head = toks[0]!;
+    if (RESERVED_SYSTEM_COMMANDS.has(head)) return null;
+    if (!domains.has(head)) return null;
+    // Refuse to chain meta-actions — they have non-standard exit semantics.
+    const sub = toks[1];
+    if (sub === 'batch' || sub === '--help' || sub === '-h' || sub === '--doc') return null;
+  }
+
+  // All-skill chain confirmed. Execute sequentially, short-circuiting on
+  // first non-zero exit.
+  const stdoutParts: string[] = [];
+  let lastResult: KernelResult = { handled: true, stdout: '', stderr: '', exitCode: 0 };
+
+  for (const seg of segments) {
+    const r = await tryKernel(seg);
+    if (!r.handled) {
+      // Defensive — pre-flight should have caught this. Bail to shell.
+      return null;
+    }
+    if (r.stdout) stdoutParts.push(r.stdout);
+    lastResult = r;
+    if (r.exitCode !== 0) {
+      return {
+        handled: true,
+        stdout: stdoutParts.join('\n'),
+        stderr: r.stderr,
+        exitCode: r.exitCode,
+      };
+    }
+  }
+  return {
+    handled: true,
+    stdout: stdoutParts.join('\n'),
+    stderr: lastResult.stderr,
+    exitCode: 0,
   };
 }
 

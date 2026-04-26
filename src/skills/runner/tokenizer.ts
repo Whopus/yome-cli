@@ -79,6 +79,49 @@ export function tokenize(input: string): string[] {
 }
 
 /**
+ * Split a line on top-level (unquoted, unescaped) `&&` boundaries.
+ *
+ * Used by the kernel to support `xl X && xl Y && xl Z` — when EVERY
+ * segment turns out to be a hub skill invocation, the kernel can run
+ * them one by one with `&&` short-circuit semantics instead of dumping
+ * the whole thing back to /bin/sh (which won't know about hub skills
+ * and exits 127).
+ *
+ * Returns:
+ *   - input as a single-element array if no top-level `&&` exists
+ *   - the trimmed segments otherwise (empty segments dropped)
+ *
+ * Does NOT split on `;`, `||`, `|` — those keep going to shell so we
+ * don't accidentally swallow real shell composition.
+ */
+export function splitOnUnquotedAmpAmp(input: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let inQuote: string | null = null;
+  let escaped = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (escaped) { current += ch; escaped = false; continue; }
+    if (ch === '\\') { current += ch; escaped = true; continue; }
+    if (inQuote) {
+      current += ch;
+      if (ch === inQuote) inQuote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inQuote = ch; current += ch; continue; }
+    if (ch === '&' && input[i + 1] === '&') {
+      segments.push(current);
+      current = '';
+      i++; // skip the second '&'
+      continue;
+    }
+    current += ch;
+  }
+  segments.push(current);
+  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/**
  * Detects whether the line contains shell control characters that mean
  * "this isn't a single skill invocation" (pipes, redirects, command
  * separators, subshells, heredoc). When true, the kernel should refuse
