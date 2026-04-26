@@ -92,25 +92,6 @@ We call them **Native Skills**:
 | **MCP Server** | Remote process | Exposes JSON-RPC tools to the LLM | github MCP, filesystem MCP |
 | **Native Skill** *(Yome)* | Your own machine (macOS / Win / Linux) | Drives native apps via AppleScript / Win32 / DBus | ppt, xl, cal, mail, rem |
 
-A Native Skill is a git repo with this layout:
-
-```
-yome-skill-ppt/
-├── yome-skill.json              # manifest: slug, domain, l1 doc, capabilities
-├── SIGNATURE.md                 # L2 doc — author-tuned signature for the LLM
-├── docs/                        # L3 doc — cookbook templates / themes
-│   ├── blue-white.md
-│   ├── black-gold.md
-│   └── academic.md
-└── backends/
-    └── macos/
-        ├── manifest.json        # action → AppleScript file mapping
-        ├── new.applescript
-        ├── title.applescript
-        ├── addtext.applescript
-        └── …
-```
-
 **Install / manage:**
 
 ```bash
@@ -219,15 +200,6 @@ tags: [theme, business]
 ---
 ```
 
-**Three-tier fallback** — old skills without `l1` / `SIGNATURE.md` / `docs/` still work:
-
-| Missing | Falls back to |
-|---|---|
-| `l1` | `prompt_line` (legacy single-liner) |
-| `prompt_line` | `<domain> — <description>` |
-| `SIGNATURE.md` | Auto-generated from `backends/macos/manifest.json` args |
-| `docs/` | "no templates available" |
-
 #### Batch mode · 6× speedup
 
 Sequential tasks are the #1 performance killer in a CLI agent — each AppleScript invocation has a 200 ms cold-start. The Yome Bash kernel has a built-in `batch` verb that fuses N steps into one call, and `--merge` further fuses N scripts into a single `osascript` process:
@@ -254,23 +226,6 @@ Measured numbers — 8 sequential `ppt` actions, M1 Mac:
 | `ppt batch <<EOF…EOF` (sequential) | 2353 ms | 1× (parsing overhead) |
 | `ppt batch --merge <<EOF…EOF` | **334 ms** | **6.1×** |
 
-Add `--keep-going` to continue past failures (default is fail-fast):
-
-```bash
-ppt batch --keep-going --merge <<EOF
-…
-EOF
-```
-
-#### One syntax, two users
-
-| In a shell (you) | In the model's Bash tool |
-|---|---|
-| `ppt --help` | `Bash({"command": "ppt --help"})` |
-| `ppt new ~/Desktop/x.pptx` | `Bash({"command": "ppt new ~/Desktop/x.pptx"})` |
-| `ppt slides \| head -3` | `Bash({"command": "ppt slides \| head -3"})` |
-| `ppt batch <<EOF\n…\nEOF` | Same heredoc, same kernel intercept |
-
 The kernel decides at the token level: is the first token a reserved system command (47 of them: `git`, `ls`, `cd`, `rm`, `node`, …)? Yes → straight to `/bin/sh`. Else → is it the domain of an installed skill? Yes → route to the skill. No → pass through to shell.
 
 So *one Bash tool* simultaneously carries:
@@ -279,8 +234,6 @@ So *one Bash tool* simultaneously carries:
 - Skill verbs (`ppt new`, `cal create`)
 - Shell composition (`ppt slides | head -3` — domain stdout piped to a real shell)
 - Batches (`ppt batch --merge <<EOF…EOF`)
-
-No need to invent a `SkillCall` tool. No need to train the model on skills. No need to teach new syntax via prompt engineering. **Bash is the interface.**
 
 ---
 
@@ -314,13 +267,6 @@ Or persist once into `~/.yome/config.json`:
 ```bash
 yome --key sk-... --base-url https://… --model …
 ```
-
-| Variable | Description | Default |
-|---|---|---|
-| `YOME_API_KEY` | API key | — |
-| `YOME_BASE_URL` | API base URL | `https://zenmux.ai/api` |
-| `YOME_MODEL` | Model name | — |
-| `YOME_PROVIDER` | `anthropic` \| `openai` | auto-detected |
 
 **Storage layout:**
 
@@ -361,7 +307,10 @@ We do not replace your tools. We **empower** them without interrupting the way y
 | Capability model (sandbox grants) | **stable** |
 | Thread history + case bundles | **stable** |
 | Live history compaction | beta |
-| Daemon (always-on agent) | experimental, on `next` branch |
+| **Daemon (always-on agent)** | experimental, on `next` branch |
+| &nbsp;&nbsp;└─ Notification interception (WeChat / Feishu / Slack / WhatsApp / iMessage) — surface what matters, suppress noise, draft replies before you ask | scoped |
+| &nbsp;&nbsp;└─ Routine automation (subscribed feeds, blogs, daily digests, alarms, calendar) — fires without you opening anything | scoped |
+| &nbsp;&nbsp;└─ State-change watchers (experiment finished, CPU/GPU spike, build green, someone @-pinged you) — push the moment, not the digest | scoped |
 | Custom missions (recurring tasks) | next-up |
 | Async agent (background long-running) | next-up |
 

@@ -92,25 +92,6 @@ yome thread submit <bundle-dir> --skill=<slug>  # 作为 PR 发布 (需要 gh CL
 | **MCP Server** | 远端进程 | 暴露 JSON-RPC tool 给 LLM | github MCP, filesystem MCP |
 | **Native Skill** *(Yome)* | 你本机 (macOS / Win / Linux) | 通过 AppleScript / Win32 / DBus 驱动原生 app | ppt, xl, cal, mail, rem |
 
-一个 Native Skill 是一个 git repo,目录长这样:
-
-```
-yome-skill-ppt/
-├── yome-skill.json              # 清单: slug, domain, l1 文档, capabilities
-├── SIGNATURE.md                 # L2 — 作者手写的 LLM 友好签名
-├── docs/                        # L3 — cookbook 模板 / 主题
-│   ├── blue-white.md
-│   ├── black-gold.md
-│   └── academic.md
-└── backends/
-    └── macos/
-        ├── manifest.json        # action → AppleScript 文件映射
-        ├── new.applescript
-        ├── title.applescript
-        ├── addtext.applescript
-        └── …
-```
-
 **安装 / 管理:**
 
 ```bash
@@ -219,15 +200,6 @@ tags: [theme, business]
 ---
 ```
 
-**三级 fallback** —— 老 skill 没写 `l1` / `SIGNATURE.md` / `docs/` 也不会坏:
-
-| 缺什么 | 回退到 |
-|---|---|
-| `l1` | `prompt_line` (旧版单行) |
-| `prompt_line` | `<domain> — <description>` |
-| `SIGNATURE.md` | 从 `backends/macos/manifest.json` 自动生成 |
-| `docs/` | "no templates available" |
-
 #### Batch mode · 6 倍提速
 
 序列任务在 cli agent 里是头号性能杀手 —— 每个 AppleScript 调用 200ms cold-start。Yome Bash kernel 内置 `batch` verb 把 N 步合成一次调用; `--merge` 进一步把 N 个 AppleScript 合成一个 `osascript` 进程:
@@ -254,23 +226,6 @@ EOF
 | `ppt batch <<EOF…EOF` (顺序执行) | 2353 ms | 1× (含解析开销) |
 | `ppt batch --merge <<EOF…EOF` | **334 ms** | **6.1×** |
 
-加 `--keep-going` 失败不中断 (默认 fail-fast):
-
-```bash
-ppt batch --keep-going --merge <<EOF
-…
-EOF
-```
-
-#### 一套语法,两个用户
-
-| 用户在 shell 里 | 模型在 Bash tool 里 |
-|---|---|
-| `ppt --help` | `Bash({"command": "ppt --help"})` |
-| `ppt new ~/Desktop/x.pptx` | `Bash({"command": "ppt new ~/Desktop/x.pptx"})` |
-| `ppt slides \| head -3` | `Bash({"command": "ppt slides \| head -3"})` |
-| `ppt batch <<EOF\n…\nEOF` | 同样的 heredoc,同样被 kernel 拦截 |
-
 Kernel 在 token 级别决定:第一个 token 是不是 reserved system command (47 个: `git`, `ls`, `cd`, `rm`, `node`…) ?是 → 直接放给 `/bin/sh`。否则 → 是不是某个已安装 skill 的 domain ?是 → 路由到 skill。否 → 透传给 shell。
 
 因此 *同一个 Bash tool* 同时承载了:
@@ -279,8 +234,6 @@ Kernel 在 token 级别决定:第一个 token 是不是 reserved system command 
 - skill verb (`ppt new`, `cal create`)
 - shell 复合 (`ppt slides | head -3` —— domain 命令的 stdout 喂给真 shell)
 - 批量 (`ppt batch --merge <<EOF…EOF`)
-
-不需要再发明 `SkillCall` 工具,不需要为 skill 训模型,不需要 prompt engineering 教模型新语法。**Bash 就是接口。**
 
 ---
 
@@ -314,13 +267,6 @@ export YOME_PROVIDER=anthropic     # 或 openai (会从 base URL 自动检测)
 ```bash
 yome --key sk-... --base-url https://… --model …
 ```
-
-| 变量 | 说明 | 默认值 |
-|---|---|---|
-| `YOME_API_KEY` | API key | — |
-| `YOME_BASE_URL` | API base URL | `https://zenmux.ai/api` |
-| `YOME_MODEL` | 模型名 | — |
-| `YOME_PROVIDER` | `anthropic` \| `openai` | 自动检测 |
 
 **存储布局:**
 
@@ -361,7 +307,10 @@ yome --key sk-... --base-url https://… --model …
 | Capability model (sandbox grants) | **stable** |
 | Thread 历史 + case bundles | **stable** |
 | Live history compaction | beta |
-| Daemon (always-on agent) | experimental, 在 `next` 分支 |
+| **Daemon (always-on agent)** | experimental, 在 `next` 分支 |
+| &nbsp;&nbsp;└─ 系统消息拦截 (微信 / 飞书 / Slack / WhatsApp / iMessage) — 实时捕获,过滤垃圾,主动协助回复,不漏任何重要消息 | scoped |
+| &nbsp;&nbsp;└─ 日程 / Routine 自动化 (订阅博主、社交频道、每日 digest、提醒闹铃、日历联动) — 不用打开就会自己跑 | scoped |
+| &nbsp;&nbsp;└─ 状态变化监听 (实验跑完、CPU / GPU 飙高、build 通过、有人 @你) — 在关键时刻推送,而不是事后汇总 | scoped |
 | Custom missions (recurring tasks) | next-up |
 | Async agent (后台长任务) | next-up |
 
