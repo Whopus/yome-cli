@@ -63,10 +63,9 @@ The agent loop must not live only in the 30 seconds after you press Enter. It sh
 
 | Capability | Meaning |
 |---|---|
-| **Daemon** | Long-lived background agent; state persists across sessions, no more "thinking only when a window is open" |
+| **Daemon** | Yome runs as an OS-level daemon, not a chat window. It watches your filesystem, calendar, IM signals, and long-running jobs in the background — and only surfaces when something matters. The agent loop never has to be re-spawned from scratch. |
 | **Live compaction** | Long sessions auto-compress history; tokens never overflow, memory never lost |
-| **Custom missions** | Recurring tasks like *"every Monday morning, draft my weekly report"* become reusable missions |
-| **Async agent** | Long jobs run in the background and push notifications when done, instead of blocking your prompt |
+| **Oncall** | The agent is event-driven, not prompt-driven. WeChat / Feishu / Slack / iMessage messages, calendar fires, build finishes, GPU spikes, *@you* mentions — Yome reacts to the world and pages you with a one-line summary + a draft response, instead of waiting for you to ask. |
 
 **Available today:**
 
@@ -76,7 +75,7 @@ yome thread share <session-id> --skill=<slug>   # build redacted case bundle
 yome thread submit <bundle-dir> --skill=<slug>  # publish as PR (needs gh CLI)
 ```
 
-Sessions, history compaction and case bundles ship today. Daemon, custom missions and async agent are next-up on the `next` branch.
+Sessions, history compaction and case bundles ship today. Daemon and Oncall are next-up on the `next` branch.
 
 ---
 
@@ -307,9 +306,8 @@ We do not replace your tools. We **empower** them without interrupting the way y
 | Capability model (sandbox grants) | **stable** |
 | Thread history + case bundles | **stable** |
 | Live history compaction | beta |
-| Daemon (always-on agent) | experimental, on `next` branch |
-| Custom missions (recurring tasks) | next-up |
-| Async agent (background long-running) | next-up |
+| Daemon (OS-level always-on loop) | experimental, on `next` branch |
+| Oncall (event-driven, auto-paging) | next-up |
 
 **Daemon roadmap** *(scoped, on `next`)*
 

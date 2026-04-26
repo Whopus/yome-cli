@@ -63,10 +63,9 @@ Agent loop 不能只活在用户敲下 Enter 的那 30 秒;它应当 always-on, 
 
 | 能力 | 含义 |
 |---|---|
-| **Daemon · 守护进程** | Agent 长驻后台,跨会话保持状态,不再"开个窗口才会思考" |
+| **Daemon · 守护进程** | Yome 是一个跑在系统层的 daemon,而不是一个聊天窗口。它在后台一直盯着你的文件系统、日历、IM 信号、长任务进程,只有真正值得打断你的时候才出现。Agent loop 永远不需要从零冷启动。 |
 | **Live compaction · 即时压缩** | 长会话自动压缩历史,token 永远不爆,记忆永远不丢 |
-| **Custom missions · 定制任务** | 把"每周一上午整理周报"这种重复任务沉淀成可复用 mission |
-| **Async agent · 异步 agent** | 后台跑长任务,完成后主动 push 通知,而不是阻塞你的 prompt |
+| **Oncall · 主动响应** | Agent 由事件驱动,而不是 prompt 驱动。微信 / 飞书 / Slack / iMessage 来消息,日历到点,build 跑完,GPU 飙高,有人 @你 —— Yome 监听这些信号,主动把"这件事 + 一个候选回复"推给你,而不是等你想起来再问它。 |
 
 **当前可用:**
 
@@ -76,7 +75,7 @@ yome thread share <session-id> --skill=<slug>   # 构建脱敏的 case bundle
 yome thread submit <bundle-dir> --skill=<slug>  # 作为 PR 发布 (需要 gh CLI)
 ```
 
-会话 / 历史压缩 / case bundle 这三件已落地。Daemon、custom missions、async agent 在 `next` 分支推进。
+会话 / 历史压缩 / case bundle 这三件已落地。Daemon 与 Oncall 在 `next` 分支推进。
 
 ---
 
@@ -307,9 +306,8 @@ yome --key sk-... --base-url https://… --model …
 | Capability model (sandbox grants) | **stable** |
 | Thread 历史 + case bundles | **stable** |
 | Live history compaction | beta |
-| Daemon (always-on agent) | experimental, 在 `next` 分支 |
-| Custom missions (recurring tasks) | next-up |
-| Async agent (后台长任务) | next-up |
+| Daemon (系统级常驻 loop) | experimental, 在 `next` 分支 |
+| Oncall (事件驱动 / 主动 paging) | next-up |
 
 **Daemon roadmap** *(scoped, 在 `next` 分支)*
 
