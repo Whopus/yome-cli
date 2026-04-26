@@ -1,6 +1,6 @@
 {
   "name": "@poping/yome",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Yome Agent — the open-source Empower Kernel CLI",
   "type": "module",
   "bin": {
@@ -8,8 +8,17 @@
   },
   "files": [
     "bin",
-    "dist"
+    "dist",
+    "NOTICE"
   ],
+  "homepage": "https://github.com/Whopus/yome-agent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Whopus/yome-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Whopus/yome-agent/issues"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "bun --watch src/index.tsx",
