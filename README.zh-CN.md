@@ -307,18 +307,23 @@ yome --key sk-... --base-url https://… --model …
 | Capability model (sandbox grants) | **stable** |
 | Thread 历史 + case bundles | **stable** |
 | Live history compaction | beta |
-| **Daemon (always-on agent)** | experimental, 在 `next` 分支 |
-| &nbsp;&nbsp;└─ 系统消息拦截 (微信 / 飞书 / Slack / WhatsApp / iMessage) — 实时捕获,过滤垃圾,主动协助回复,不漏任何重要消息 | scoped |
-| &nbsp;&nbsp;└─ 日程 / Routine 自动化 (订阅博主、社交频道、每日 digest、提醒闹铃、日历联动) — 不用打开就会自己跑 | scoped |
-| &nbsp;&nbsp;└─ 状态变化监听 (实验跑完、CPU / GPU 飙高、build 通过、有人 @你) — 在关键时刻推送,而不是事后汇总 | scoped |
+| Daemon (always-on agent) | experimental, 在 `next` 分支 |
 | Custom missions (recurring tasks) | next-up |
 | Async agent (后台长任务) | next-up |
+
+**Daemon roadmap** *(scoped, 在 `next` 分支)*
+
+- [ ] **系统消息拦截** — 微信 / 飞书 / Slack / WhatsApp / iMessage。实时捕获,过滤垃圾,主动协助回复,不漏任何重要消息。
+- [ ] **日程 / Routine 自动化** — 订阅博主、社交频道、每日 digest、提醒闹铃、日历联动。不用打开就会自己跑。
+- [ ] **状态变化监听** — 实验跑完、CPU / GPU 飙高、build 通过、有人 @你。在关键时刻推送,而不是事后汇总。
 
 ---
 
 ## License
 
-MIT。Skills 是作者拥有的 git repo,各自适用其自己的 license。
+[Apache License 2.0](./LICENSE) —— Yome Agent + 官方 skills (`yome-skill-ppt`, `yome-skill-xl`, `yome-skill-cal`, `yome-skill-rem`, `yome-skill-fs`)。
+
+社区贡献者发布到 Yome hub 的 skill 是作者自己的 git repo,各自适用其自己的 license。
 
 ---
 

@@ -307,18 +307,23 @@ We do not replace your tools. We **empower** them without interrupting the way y
 | Capability model (sandbox grants) | **stable** |
 | Thread history + case bundles | **stable** |
 | Live history compaction | beta |
-| **Daemon (always-on agent)** | experimental, on `next` branch |
-| &nbsp;&nbsp;└─ Notification interception (WeChat / Feishu / Slack / WhatsApp / iMessage) — surface what matters, suppress noise, draft replies before you ask | scoped |
-| &nbsp;&nbsp;└─ Routine automation (subscribed feeds, blogs, daily digests, alarms, calendar) — fires without you opening anything | scoped |
-| &nbsp;&nbsp;└─ State-change watchers (experiment finished, CPU/GPU spike, build green, someone @-pinged you) — push the moment, not the digest | scoped |
+| Daemon (always-on agent) | experimental, on `next` branch |
 | Custom missions (recurring tasks) | next-up |
 | Async agent (background long-running) | next-up |
+
+**Daemon roadmap** *(scoped, on `next`)*
+
+- [ ] **Notification interception** — WeChat / Feishu / Slack / WhatsApp / iMessage. Surface what matters, suppress noise, draft replies before you ask.
+- [ ] **Routine automation** — subscribed feeds, blogs, daily digests, alarms, calendar. Fires without you opening anything.
+- [ ] **State-change watchers** — experiment finished, CPU/GPU spike, build green, someone @-pinged you. Push the moment, not the digest.
 
 ---
 
 ## License
 
-MIT. Skills are author-owned git repos under their own licenses.
+[Apache License 2.0](./LICENSE) — Yome Agent + official skills (`yome-skill-ppt`, `yome-skill-xl`, `yome-skill-cal`, `yome-skill-rem`, `yome-skill-fs`).
+
+Community-contributed skills published to the Yome hub are author-owned git repositories under their own license terms.
 
 ---
 

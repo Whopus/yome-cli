@@ -1,0 +1,11 @@
+Yome Agent
+Copyright 2024-2026 Whopus / Yome contributors
+
+This product includes software developed at Whopus (https://yome.work).
+
+Licensed under the Apache License, Version 2.0; see LICENSE for the
+full text.
+
+The Yome Agent is the open-source agent runtime + skill client for the
+Yome platform. It is the same binary published to npm as @poping/yome,
+and mirrored as github.com/Whopus/yome-agent.
