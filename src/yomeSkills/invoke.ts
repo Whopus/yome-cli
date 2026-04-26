@@ -11,6 +11,7 @@ import { readManifest, type SkillManifest } from './manifest.js';
 import { isCapabilityAllowed } from './capabilities.js';
 import {
   dispatchMacos,
+  loadMacosBackend,
   type SkillCall as DispatchCall,
   type DispatchResult,
 } from '../skills/runner/dispatcher.js';
@@ -102,16 +103,48 @@ export async function invokeSkill(req: InvokeRequest): Promise<InvokeResult> {
     };
   }
 
-  // Pick the right backend for this host. We're CLI-on-macOS so the
-  // delivery.macos slot is what we want; if the skill only ships a node
-  // backend, dispatch to that instead (M1 — node backend not implemented
-  // yet, returns an explanatory error).
+  // Pick the right backend for this host.
+  //
+  // The CLI is a Node process — NOT the macOS Yome.app host. So
+  // `delivery.macos.backend === "bundled"` (= Swift code that lives
+  // inside Yome.app) is unreachable from here. Skills that need to drive
+  // native macOS apps from the CLI must ship a `backends/macos/` OTA
+  // AppleScript backend (manifest.json + per-action .applescript files),
+  // which the dispatcher renders into osascript invocations.
+  //
+  // On non-darwin hosts there is no path at all today — return a clear
+  // diagnostic, don't silently fall through.
   const platform = process.platform;
   if (platform !== 'darwin') {
     return {
       ok: false, stdout: '',
       stderr: `hub skill execution currently requires macOS (got ${platform})`,
       exitCode: 1, resolvedSlug: entry.slug,
+    };
+  }
+
+  if (!loadMacosBackend(entry.installedAt)) {
+    // Explain WHY there's no usable backend, instead of the old terse
+    // "no macos backend installed". Most often: skill ships a bundled
+    // Swift impl (Yome.app only), no OTA AppleScript templates for CLI.
+    const delivery = (manifest.delivery ?? {}) as Record<string, { backend?: string } | undefined>;
+    const macosKind = delivery.macos?.backend;
+    const hints: string[] = [];
+    if (macosKind === 'bundled') {
+      hints.push(
+        'macOS implementation is "bundled" — runs inside Yome.app (Swift), ' +
+        'not from the CLI. Use the macOS app, or have the skill author publish ' +
+        'a backends/macos/ OTA AppleScript backend.',
+      );
+    } else {
+      hints.push('skill is missing backends/macos/manifest.json (no OTA AppleScript backend).');
+    }
+    return {
+      ok: false, stdout: '',
+      stderr:
+        `no macos backend the CLI can invoke for ${entry.slug}.\n` +
+        hints.map((h) => '  - ' + h).join('\n'),
+      exitCode: 2, resolvedSlug: entry.slug,
     };
   }
 

@@ -167,7 +167,11 @@ if (
   // but argv preserves the user's exact tokens.
   const raw = process.argv.slice(2).filter((a) => {
     // Drop CLI-global flags so they don't leak into the skill call.
-    return !/^--?(key|base-url|baseUrl|model|provider|force|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify|reason|replaced-by|replacedBy|version|allow-deprecated|allowDeprecated)(=|$)/.test(a);
+    // NOTE: do NOT strip `--force` here. Skills (e.g. `ppt slide.delete 3 --force`)
+    // legitimately use --force as a per-action flag, and it's their semantics
+    // — not the CLI-global `--force` of `yome skill install --force` — that
+    // matters once we've decided this is a skill invocation.
+    return !/^--?(key|base-url|baseUrl|model|provider|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify|reason|replaced-by|replacedBy|version|allow-deprecated|allowDeprecated)(=|$)/.test(a);
   });
   const commandLine = raw.map((a) => /\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
   const k = await tryKernel(commandLine);

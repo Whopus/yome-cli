@@ -381,7 +381,6 @@ function renderAutoSignature(skill: SkillIndexEntry): string {
         }
       }
       const tail = [...positionals, ...flags].join(' ');
-      // Pull description from manifest.commands when available.
       let desc = '';
       if (manifest && Array.isArray(manifest.commands)) {
         for (const c of manifest.commands as Array<{ action?: string; desc?: string }>) {
