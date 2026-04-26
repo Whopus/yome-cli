@@ -2,6 +2,7 @@
 
 import { installFromLocal } from './install.js';
 import { installFromGithub, isGithubSource } from './installGithub.js';
+import { installFromHubTarball } from './installFromHubTarball.js';
 import { listInstalled } from './list.js';
 import { uninstallBySlug } from './uninstall.js';
 import { getYomeSkillsRoot } from './paths.js';
@@ -161,9 +162,12 @@ export async function runWhoami(): Promise<number> {
 async function doInstall(args: string[], flags: SkillCliFlags): Promise<number> {
   const source = args[0];
   if (!source) {
-    console.error('Usage: yome skill install <source> [--force] [--verbose]');
-    console.error('  <source> can be a local path, github:owner/repo[@ref][#subpath],');
-    console.error('  or https://github.com/owner/repo[/tree/<ref>/<subpath>]');
+    console.error('Usage: yome skill install <source> [--version <semver>] [--force] [--verbose]');
+    console.error('  <source> can be:');
+    console.error('    @owner/name                    - resolve via hub (fastest)');
+    console.error('    github:owner/repo[@ref][#sub]  - direct git clone');
+    console.error('    https://github.com/owner/repo  - direct git clone');
+    console.error('    ./local/path                   - local directory');
     return 2;
   }
   const installOpts = {
@@ -173,18 +177,75 @@ async function doInstall(args: string[], flags: SkillCliFlags): Promise<number> 
     skipVerify: flags.skipVerify,
     allowDeprecated: flags.allowDeprecated,
   };
-  const result = isGithubSource(source)
-    ? await installFromGithub(source, installOpts)
-    : await installFromLocal(source, installOpts);
+
+  let result: Awaited<ReturnType<typeof installFromGithub>>;
+  let installPath: 'hub' | 'github' | 'local' = 'local';
+
+  if (isHubSource(source)) {
+    // @owner/name — go straight to hub-cached tarball. Fall back to
+    // GitHub clone if the hub doesn't have the version (legacy / not
+    // yet backfilled).
+    installPath = 'hub';
+    const hubResult = await installFromHubTarball(source, { ...installOpts, version: flags.version });
+    if (hubResult.ok) {
+      result = hubResult;
+    } else {
+      // Try to recover via GitHub clone if hub answered with a
+      // recoverable reason. We resolve the github_full_name from the
+      // hub metadata first to construct the clone source.
+      const fallbackSource = await resolveGithubFallbackForSlug(source);
+      if (fallbackSource) {
+        installPath = 'github';
+        if (flags.verbose) {
+          console.log(`! hub tarball unavailable (${hubResult.reason}); falling back to ${fallbackSource}`);
+        }
+        result = await installFromGithub(fallbackSource, installOpts);
+      } else {
+        result = hubResult;
+      }
+    }
+  } else if (isGithubSource(source)) {
+    installPath = 'github';
+    result = await installFromGithub(source, installOpts);
+  } else {
+    installPath = 'local';
+    result = await installFromLocal(source, installOpts);
+  }
+
   if (!result.ok) {
     console.error(`✗ install failed: ${result.reason}`);
     return 1;
   }
-  console.log(`✓ installed ${result.slug} → ${result.installedAt} (${result.copiedFiles} files)`);
+  const via = installPath === 'hub' ? ' [via hub]' : installPath === 'github' ? ' [via github]' : '';
+  console.log(`✓ installed ${result.slug} → ${result.installedAt} (${result.copiedFiles} files)${via}`);
   if (result.slug) {
     try { await pingHubInstall(result.slug); } catch { /* unreachable */ }
   }
   return 0;
+}
+
+/** "@owner/name" — the public marketplace slug shape. */
+function isHubSource(s: string): boolean {
+  return /^@[a-z][\w.-]*\/[a-z][\w.-]*$/i.test(s.trim());
+}
+
+/**
+ * Best-effort: ask the hub what GitHub repo a slug lives in so we can
+ * fall back to a git clone when the hub tarball isn't available. Returns
+ * a `github:owner/repo` source string or null if the lookup fails.
+ */
+async function resolveGithubFallbackForSlug(slug: string): Promise<string | null> {
+  const HUB_BASE = (process.env.YOME_HUB_BASE || 'https://yome.work').replace(/\/+$/, '');
+  try {
+    const r = await fetch(`${HUB_BASE}/api/hub/skills/${encodeURIComponent(slug)}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { ok?: boolean; skill?: { github_full_name?: string } };
+    const full = j?.skill?.github_full_name;
+    if (!full || typeof full !== 'string' || !full.includes('/')) return null;
+    return `github:${full}`;
+  } catch { return null; }
 }
 
 function doUninstall(args: string[]): number {
