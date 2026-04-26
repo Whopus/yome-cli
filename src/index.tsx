@@ -75,6 +75,10 @@ const cli = meow(
       grant: { type: 'string' },
       revoke: { type: 'string' },
       skipVerify: { type: 'boolean' },
+      reason: { type: 'string' },
+      replacedBy: { type: 'string' },
+      version: { type: 'string' },
+      allowDeprecated: { type: 'boolean' },
     },
   },
 );
@@ -90,6 +94,10 @@ if (cli.input[0] === 'skill') {
     grant: cli.flags.grant,
     revoke: cli.flags.revoke,
     skipVerify: !!cli.flags.skipVerify,
+    reason: cli.flags.reason,
+    replacedBy: cli.flags.replacedBy,
+    version: cli.flags.version,
+    allowDeprecated: !!cli.flags.allowDeprecated,
   });
   process.exit(exit);
 }
@@ -159,7 +167,7 @@ if (
   // but argv preserves the user's exact tokens.
   const raw = process.argv.slice(2).filter((a) => {
     // Drop CLI-global flags so they don't leak into the skill call.
-    return !/^--?(key|base-url|baseUrl|model|provider|force|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify)(=|$)/.test(a);
+    return !/^--?(key|base-url|baseUrl|model|provider|force|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify|reason|replaced-by|replacedBy|version|allow-deprecated|allowDeprecated)(=|$)/.test(a);
   });
   const commandLine = raw.map((a) => /\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
   const k = await tryKernel(commandLine);

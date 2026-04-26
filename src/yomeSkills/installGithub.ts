@@ -33,21 +33,48 @@ function getHubBase(): string {
 
 /**
  * Best-effort hub lookup for a skill's expected sha256 fingerprint at
- * the given version. Returns null if the hub doesn't know about this
- * slug, doesn't have a fingerprint for that version (older publish), or
- * is unreachable. The caller treats null as "no verification possible,
- * proceed".
+ * the given version, plus deprecation metadata. Returns null fields
+ * when the hub doesn't know about this slug or the version (older
+ * publish, hub unreachable, etc.) — the caller treats null sha as
+ * "no verification possible, proceed" to keep installs working
+ * offline / against legacy data.
  */
-async function fetchExpectedSha256(slug: string, version: string): Promise<string | null> {
+interface HubVersionLookup {
+  tarball_sha256: string | null;
+  deprecated: boolean;
+  deprecation_reason: string | null;
+  replaced_by_version: string | null;
+}
+
+async function fetchHubVersionMeta(slug: string, version: string): Promise<HubVersionLookup> {
+  const empty: HubVersionLookup = {
+    tarball_sha256: null,
+    deprecated: false,
+    deprecation_reason: null,
+    replaced_by_version: null,
+  };
   try {
     const url = `${getHubBase()}/api/hub/skills/${encodeURIComponent(slug)}?version=${encodeURIComponent(version)}`;
     const r = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { ok?: boolean; version?: { tarball_sha256?: string | null } };
-    if (!j || j.ok !== true) return null;
-    const sha = j.version?.tarball_sha256 ?? null;
-    return sha && sha.length >= 32 ? sha : null;
-  } catch { return null; }
+    if (!r.ok) return empty;
+    const j = (await r.json()) as {
+      ok?: boolean;
+      version?: {
+        tarball_sha256?: string | null;
+        deprecated?: boolean;
+        deprecation_reason?: string | null;
+        replaced_by_version?: string | null;
+      };
+    };
+    if (!j || j.ok !== true || !j.version) return empty;
+    const sha = j.version.tarball_sha256 ?? null;
+    return {
+      tarball_sha256: sha && sha.length >= 32 ? sha : null,
+      deprecated: !!j.version.deprecated,
+      deprecation_reason: j.version.deprecation_reason ?? null,
+      replaced_by_version: j.version.replaced_by_version ?? null,
+    };
+  } catch { return empty; }
 }
 
 export interface ParsedGithubSource {
@@ -122,6 +149,13 @@ interface GithubInstallExtra {
   expectedSha256?: string | null;
   /** Disable post-install sha256 verification entirely (dev/debug). */
   skipVerify?: boolean;
+  /**
+   * Install a deprecated version on purpose. Without this flag, the cli
+   * refuses with a pointer to `replaced_by_version`. Default false so
+   * users get a loud signal when they're about to install something the
+   * author marked as superseded.
+   */
+  allowDeprecated?: boolean;
 }
 
 /**
@@ -153,13 +187,33 @@ export async function installFromGithub(source: string, opts: InstallOptions & G
     if (!existsSync(join(skillDir, 'yome-skill.json'))) {
       return { ok: false, reason: `${parsed.owner}/${parsed.repo}${parsed.subPath ? `/${parsed.subPath}` : ''} has no yome-skill.json` };
     }
-    // If the caller didn't pre-fetch an expectedSha256, do it now from
-    // the hub. Best-effort — hub unreachable or no fingerprint → null,
-    // and the install proceeds without verification (back-compat).
-    if (!opts.skipVerify && !opts.expectedSha256) {
-      const cloneManifest = readManifest(skillDir);
-      if (cloneManifest) {
-        opts.expectedSha256 = await fetchExpectedSha256(cloneManifest.slug, cloneManifest.version);
+    // Hub lookup: fetch sha256 fingerprint AND deprecation status in
+    // one shot, since we're already paying the round-trip cost. Best-
+    // effort — hub unreachable / no record → empty meta and the install
+    // proceeds without verification (back-compat with offline / legacy
+    // versions).
+    const cloneManifest = readManifest(skillDir);
+    if (cloneManifest) {
+      const meta = await fetchHubVersionMeta(cloneManifest.slug, cloneManifest.version);
+      if (meta.deprecated && !opts.allowDeprecated) {
+        const replaced = meta.replaced_by_version
+          ? ` Use --version ${meta.replaced_by_version} instead, or pass --allow-deprecated to override.`
+          : ' Pass --allow-deprecated to install it anyway.';
+        const why = meta.deprecation_reason ? ` Reason: ${meta.deprecation_reason}.` : '';
+        return {
+          ok: false,
+          reason:
+            `${cloneManifest.slug}@${cloneManifest.version} is deprecated.${why}${replaced}`,
+        };
+      }
+      if (meta.deprecated && opts.allowDeprecated) {
+        const why = meta.deprecation_reason ? ` (${meta.deprecation_reason})` : '';
+        console.warn(
+          `! installing deprecated ${cloneManifest.slug}@${cloneManifest.version}${why}`,
+        );
+      }
+      if (!opts.skipVerify && !opts.expectedSha256) {
+        opts.expectedSha256 = meta.tarball_sha256;
       }
     }
     const result = await installFromLocal(skillDir, opts);

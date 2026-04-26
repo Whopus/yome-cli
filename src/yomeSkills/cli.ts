@@ -12,6 +12,7 @@ import { setSkillEnabled, isSkillDisabled } from './enable.js';
 import { updateSkills } from './update.js';
 import { linkSkill, unlinkSkill } from './devLink.js';
 import { publishSkill } from './publish.js';
+import { deprecateSkillVersion, syncSkillFromHub } from './deprecate.js';
 import { searchHub } from './search.js';
 import { readInstallMeta } from './installMeta.js';
 import {
@@ -37,6 +38,14 @@ export interface SkillCliFlags {
   grant?: string;
   /** --skip-verify: bypass post-install sha256 check. Only for dev. */
   skipVerify?: boolean;
+  /** --reason "<text>": deprecation reason (yome skill deprecate). */
+  reason?: string;
+  /** --replaced-by <semver>: pointer to the version users should move to (yome skill deprecate). */
+  replacedBy?: string;
+  /** --version <semver>: install a specific version (yome skill install / update). */
+  version?: string;
+  /** --allow-deprecated: install a deprecated version on purpose. */
+  allowDeprecated?: boolean;
 }
 
 export async function runSkillSubcommand(args: string[], flags: SkillCliFlags): Promise<number> {
@@ -54,6 +63,8 @@ export async function runSkillSubcommand(args: string[], flags: SkillCliFlags): 
     case 'unlink':            return doUnlink(args.slice(1));
     case 'search':            return await doSearch(args.slice(1), flags);
     case 'publish':           return await doPublish(args.slice(1), flags);
+    case 'deprecate':         return await doDeprecate(args.slice(1), flags);
+    case 'sync':              return await doSync(args.slice(1), flags);
     case 'perms':             return doPerms(args.slice(1), flags);
     case 'validate':          return doValidate(args.slice(1), flags);
     case 'doctor':            return doDoctor(flags);
@@ -160,6 +171,7 @@ async function doInstall(args: string[], flags: SkillCliFlags): Promise<number> 
     verbose: flags.verbose,
     yes: flags.yes,
     skipVerify: flags.skipVerify,
+    allowDeprecated: flags.allowDeprecated,
   };
   const result = isGithubSource(source)
     ? await installFromGithub(source, installOpts)
@@ -299,7 +311,73 @@ async function doSearch(args: string[], flags: SkillCliFlags): Promise<number> {
 async function doPublish(_args: string[], flags: SkillCliFlags): Promise<number> {
   const r = await publishSkill(process.cwd(), { force: flags.force });
   if (!r.ok) { console.error(`✗ publish failed: ${r.reason}`); return 1; }
-  console.log(`✓ published ${r.slug} v${r.version}`);
+  if (r.outcome === 'noop_same_sha') {
+    console.log(`= ${r.slug} v${r.version} already up-to-date on hub (same sha, nothing to do)`);
+  } else {
+    console.log(`✓ published ${r.slug} v${r.version}`);
+  }
+  return 0;
+}
+
+async function doDeprecate(args: string[], flags: SkillCliFlags): Promise<number> {
+  // Accept both `yome skill deprecate @owner/name@1.0.0` and the
+  // longer `yome skill deprecate @owner/name 1.0.0` form.
+  let slug: string | undefined;
+  let version: string | undefined;
+  if (args[0]?.includes('@', 1)) {
+    // @owner/name@1.0.0 — split on the LAST '@'.
+    const at = args[0].lastIndexOf('@');
+    slug = args[0].slice(0, at);
+    version = args[0].slice(at + 1);
+  } else {
+    slug = args[0];
+    version = args[1];
+  }
+  if (!slug || !version) {
+    console.error('Usage: yome skill deprecate <@owner/name>@<version> [--reason "..."] [--replaced-by <semver>]');
+    return 2;
+  }
+  const r = await deprecateSkillVersion({
+    slug,
+    version,
+    reason: flags.reason ?? null,
+    replacedBy: flags.replacedBy ?? null,
+  });
+  if (flags.json) {
+    process.stdout.write(JSON.stringify(r, null, 2) + '\n');
+    return r.ok ? 0 : 1;
+  }
+  if (!r.ok) { console.error(`✗ deprecate failed: ${r.reason}`); return 1; }
+  if (r.alreadyDeprecated) {
+    console.log(`= ${slug}@${version} was already deprecated (${r.deprecatedAt ?? '?'})`);
+  } else {
+    const replaced = r.replacedBy ? `, users will be pointed at ${r.replacedBy}` : '';
+    console.log(`✓ deprecated ${slug}@${version}${replaced}`);
+  }
+  return 0;
+}
+
+async function doSync(args: string[], flags: SkillCliFlags): Promise<number> {
+  const slug = args[0];
+  if (!slug) {
+    console.error('Usage: yome skill sync <@owner/name>');
+    console.error('  Triggers the hub to re-pull the skill from its GitHub repo.');
+    return 2;
+  }
+  const r = await syncSkillFromHub({ slug });
+  if (flags.json) {
+    process.stdout.write(JSON.stringify(r, null, 2) + '\n');
+    return r.ok ? 0 : 1;
+  }
+  if (!r.ok) {
+    console.error(`✗ sync failed: ${r.reason}`);
+    if (r.code === 'not_implemented_yet') {
+      console.error('   (the manual-sync pipeline lands in the next hub release; for now run');
+      console.error('    `yome skill publish` from a clean clone of the repo.)');
+    }
+    return 1;
+  }
+  console.log(`✓ synced ${slug}`);
   return 0;
 }
 
@@ -435,6 +513,12 @@ Subcommands:
   unlink <slug>       Remove a dev-link
   search <query>      Search the public hub (--json for machine-readable)
   publish             Publish the cwd skill to the hub (requires 'yome login')
+  deprecate <slug>@<version>
+                      Mark a published version as deprecated (--reason "..."
+                      --replaced-by <semver>). Hub stops serving it as the
+                      default; --version <v> install still works.
+  sync <slug>         Ask the hub to re-pull the skill from GitHub right
+                      now (manual rescue when webhook delivery was lost).
   perms <slug>        View / change capability grants
                       e.g. yome skill perms @yome/ppt --revoke=fs:write
   validate [<path>]   Lint a skill directory (defaults to cwd)
@@ -455,5 +539,7 @@ Examples:
   yome skill link ./my-new-skill
   yome login
   yome skill publish
+  yome skill deprecate @yome/ppt@1.0.0 --reason "force-pushed; sha drift" --replaced-by 1.0.1
+  yome skill sync @yome/ppt
 `);
 }

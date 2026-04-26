@@ -31,6 +31,8 @@ export interface PublishResult {
   ok: boolean;
   slug?: string;
   version?: string;
+  /** 'created' for a brand-new version row, 'noop_same_sha' for an idempotent re-publish. */
+  outcome?: 'created' | 'noop_same_sha';
   hubResponse?: unknown;
   reason?: string;
 }
@@ -79,7 +81,13 @@ export async function publishSkill(cwd: string, opts: PublishOptions = {}): Prom
       ? String((parsed as { error: unknown }).error) : `HTTP ${resp.status}`;
     return { ok: false, reason: `hub rejected publish: ${reason}` };
   }
-  return { ok: true, slug: manifest.slug, version: manifest.version, hubResponse: parsed };
+  const outcome =
+    parsed && typeof parsed === 'object' && 'outcome' in parsed
+      ? ((parsed as { outcome?: string }).outcome === 'noop_same_sha'
+          ? 'noop_same_sha'
+          : 'created')
+      : 'created';
+  return { ok: true, slug: manifest.slug, version: manifest.version, outcome, hubResponse: parsed };
 }
 
 interface GitInspect {
