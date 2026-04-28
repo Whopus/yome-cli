@@ -5,26 +5,41 @@ import { readTool } from './read.js';
 import { editTool } from './edit.js';
 import { writeTool } from './write.js';
 import { bashTool } from './bash.js';
+import { yomeTool } from './yome.js';
 import { globTool } from './glob.js';
 import { grepTool } from './grep.js';
 import { lsTool } from './ls.js';
+import { askUserTool } from './askUser.js';
+import { todoWriteTool } from './todoWrite.js';
 
 const DEFAULT_MAX_RESULT_CHARS = 20_000;
 
-// NOTE: We deliberately do NOT register a `SkillCall` tool any more.
-// Hub skill invocations are handled by the agentic bash kernel — the
-// model just emits `<domain> <action> ...` through the Bash tool and
-// `tryKernel()` (in cli/src/skills/runner/kernel.ts) routes it to the
-// same dispatcher SkillCall used to use, with capability checks intact.
+// Hub skill invocations are handled by the dedicated `Yome` tool, which
+// runs the kernel in cli/src/skills/runner/kernel.ts. `Bash` is now a
+// pure /bin/sh wrapper with no implicit skill routing — the agent picks
+// the right tool based on intent (skill call vs shell op).
+//
+// `AskUser` and `TodoWrite` are interactive / state-management tools.
+// AskUser pauses the agent loop until the TUI returns the user's
+// answers (and degrades to "no UI" in headless mode); TodoWrite mutates
+// session-scope todo state that the UI subscribes to.
 export const BASE_TOOLS: ToolDef[] = [
   readTool,
   editTool,
   writeTool,
   bashTool,
+  yomeTool,
+  askUserTool,
+  todoWriteTool,
   globTool,
   grepTool,
   lsTool,
 ];
+
+// Re-export the AskUser handler hook so App.tsx can register the TUI
+// implementation without reaching into the tools/ subtree directly.
+export { setAskUserHandler } from './askUser.js';
+export type { AskUserQuestion, AskUserResult } from './askUser.js';
 
 const toolMap = new Map<string, ToolDef>();
 for (const t of BASE_TOOLS) toolMap.set(t.name, t);

@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 import type { ToolDef } from '../types.js';
 import type { PermissionResult, ToolPermissionContext } from '../permissions/types.js';
 import { isContentAllowed, isContentDenied } from '../permissions/checker.js';
-import { tryKernel } from '../skills/runner/kernel.js';
 
 const MAX_OUTPUT = 20_000;
 // Cap per-stream buffer to 4× the output limit. Without this, a runaway
@@ -12,16 +11,16 @@ const MAX_OUTPUT = 20_000;
 // process gets OOM-killed mid-session".
 const MAX_BUFFER = MAX_OUTPUT * 4;
 
-// ── Yome agentic kernel intercept ─────────────────────────────────
+// ── Pure system shell ─────────────────────────────────────────────
 //
-// Before we hand a command off to /bin/sh we ask the yome kernel whether
-// it owns the line. If `tokens[0]` matches the `domain` of an installed
-// hub skill, the kernel runs the action via the same dispatcher the
-// macOS app uses (with capability gating, AppleScript template render,
-// argv parsing, --help) and returns a synthetic stdout/stderr/exitCode.
+// Bash used to call `tryKernel()` first to opportunistically intercept
+// hub-skill invocations like `xl books`. That made routing implicit and
+// hard to debug — it was never obvious whether a given Bash call had
+// actually hit /bin/sh or had been redirected into AppleScript.
 //
-// Anything the kernel doesn't claim falls through to plain shell.
-// Compound shell (pipes, &&, ;, redirects, subshells) is never intercepted.
+// The kernel intercept now lives behind a separate `Yome` tool
+// (cli/src/tools/yome.ts). Bash is once again *only* a system shell;
+// the agent picks the right tool up-front based on intent.
 
 function runShell(command: string, timeout: number): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
@@ -96,10 +95,11 @@ function formatOutput(stdout: string, stderr: string, exitCode: number): string 
 export const bashTool: ToolDef = {
   name: 'Bash',
   description:
-    'Execute a shell command and return its output. Commands run in the current working directory. ' +
-    'When the first token matches an installed hub skill domain (e.g. `ppt`), the yome agentic kernel ' +
-    'intercepts the line and dispatches to the skill instead of the system shell — capability checks ' +
-    'are enforced. Compound shell (pipes, &&, ;, redirects) always goes to /bin/sh.',
+    'Execute a system shell command via /bin/sh and return its output. ' +
+    'Use this for real shell operations: ls, cat, mkdir, git, curl, build/test runners, pipes, redirects, etc. ' +
+    'Commands run in the current working directory. ' +
+    'This tool does NOT route to yome hub skills — to invoke an installed skill (xl, ppt, cal, fs, rem, …) ' +
+    'use the dedicated `Yome` tool instead.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -129,13 +129,6 @@ export const bashTool: ToolDef = {
     const command = input.command as string;
     const timeout = ((input.timeout as number) || 30) * 1000;
 
-    // Try the yome kernel first.
-    const k = await tryKernel(command);
-    if (k.handled) {
-      return formatOutput(k.stdout, k.stderr, k.exitCode);
-    }
-
-    // Otherwise, real shell.
     const { stdout, stderr, exitCode } = await runShell(command, timeout);
     return formatOutput(stdout, stderr, exitCode);
   },

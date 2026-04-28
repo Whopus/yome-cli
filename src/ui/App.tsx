@@ -13,7 +13,11 @@ import { AgentPicker } from './AgentPicker.js';
 import { ModelPicker } from './ModelPicker.js';
 import { SessionPicker } from './SessionPicker.js';
 import { PermissionPrompt, type PermissionChoice } from './PermissionPrompt.js';
+import { AskUserPrompt } from './AskUserPrompt.js';
+import { TodoPanel } from './TodoPanel.js';
 import type { AskPermissionResult } from '../tools/index.js';
+import { setAskUserHandler, type AskUserQuestion, type AskUserResult } from '../tools/index.js';
+import { getTodos, setTodosChangeHandler, clearTodos, type TodoItem } from '../state/todos.js';
 import { TogglePicker } from './TogglePicker.js';
 import { UnifiedSkillsPicker } from './UnifiedSkillsPicker.js';
 import { MarketplacePicker } from './MarketplacePicker.js';
@@ -65,7 +69,17 @@ export function App({ config }: AppProps) {
   } | null>(null);
   const pendingPermissionRef = useRef(pendingPermission);
   pendingPermissionRef.current = pendingPermission;
+  const [pendingAskUser, setPendingAskUser] = useState<{
+    questions: AskUserQuestion[];
+    resolve: (result: AskUserResult) => void;
+  } | null>(null);
+  const [todos, setLocalTodos] = useState<TodoItem[]>(() => getTodos());
   const [pickerVersion, setPickerVersion] = useState(0);
+  // Bumped whenever the conversation resets (`/new`, session restore).
+  // MessageList forwards this to <Static key=...> so Ink remounts the
+  // append-only scrollback buffer instead of leaving the old chat
+  // visible above the new one.
+  const [resetEpoch, setResetEpoch] = useState(0);
   const [usage, setUsage] = useState({ inputTokens: 0, outputTokens: 0 });
   const [agent] = useState(() => new Agent(config));
   const [loopName, setLoopName] = useState(() => agent.getCurrentLoopName());
@@ -87,6 +101,17 @@ export function App({ config }: AppProps) {
         stream.reset();
         setUsage({ inputTokens: 0, outputTokens: 0 });
         isFirstMessage.current = true;
+        // Wipe todos too — a new session shouldn't inherit the previous
+        // task list. setTodos triggers the change handler, which keeps
+        // the panel in sync.
+        clearTodos();
+        // Wipe the terminal scrollback so the previous chat actually
+        // disappears. Ink's <Static> is append-only — without clearing
+        // the screen + bumping resetEpoch (forces a fresh Static
+        // instance) the user sees the old session sitting above the new
+        // banner, which is exactly the "/new doesn't work" symptom.
+        process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+        setResetEpoch((e) => e + 1);
         return;
       }
 
@@ -349,6 +374,9 @@ export function App({ config }: AppProps) {
       setUsage({ inputTokens: 0, outputTokens: 0 });
       isFirstMessage.current = false;
       setShowSessionPicker(false);
+      // Same scrollback-clearing dance as /new — see comment there.
+      process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+      setResetEpoch((e) => e + 1);
     },
     [agent, stream],
   );
@@ -489,7 +517,30 @@ export function App({ config }: AppProps) {
     if (initialPrompt) handleSubmit(initialPrompt);
   }, []);
 
-  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || showSessionPicker || showMarketplace || pendingPermission !== null;
+  // Wire up the AskUser tool: register a TUI handler that pushes the
+  // questions into pendingAskUser state and resolves the promise once
+  // the user finishes (or cancels) the AskUserPrompt component.
+  useEffect(() => {
+    setAskUserHandler((questions) => {
+      return new Promise<AskUserResult>((resolve) => {
+        setPendingAskUser({ questions, resolve });
+      });
+    });
+    // No teardown — leaving a handler in place across remounts is safe;
+    // the closure captures the latest setPendingAskUser via React's
+    // stable setState identity.
+  }, []);
+
+  // Mirror the session-scope todo store into local React state so the
+  // TodoPanel re-renders on every TodoWrite call.
+  useEffect(() => {
+    setTodosChangeHandler((next) => setLocalTodos(next));
+    // Pick up any todos written before this effect attached (cheap; the
+    // store's getTodos is just a module-scope read).
+    setLocalTodos(getTodos());
+  }, []);
+
+  const isPickerOpen = showAgentPicker || showModelPicker || showSkillsPicker || showAgentsPicker || showSessionPicker || showMarketplace || pendingPermission !== null || pendingAskUser !== null;
 
   const PERMISSION_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
@@ -556,7 +607,7 @@ export function App({ config }: AppProps) {
         </Box>
       )}
 
-      <MessageList messages={messages} streamText={stream.displayText} isRunning={isRunning} />
+      <MessageList messages={messages} streamText={stream.displayText} isRunning={isRunning} resetEpoch={resetEpoch} />
 
       {showAgentPicker && (
         <Box marginTop={1}>
@@ -637,6 +688,18 @@ export function App({ config }: AppProps) {
           onResolve={handlePermissionResolve}
         />
       )}
+
+      {pendingAskUser && (
+        <AskUserPrompt
+          questions={pendingAskUser.questions}
+          onResolve={(result) => {
+            pendingAskUser.resolve(result);
+            setPendingAskUser(null);
+          }}
+        />
+      )}
+
+      <TodoPanel todos={todos} />
 
       {!isRunning && !isPickerOpen && (
         <InputBar

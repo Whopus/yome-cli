@@ -121,11 +121,14 @@ You help with software engineering tasks: reading code, writing code, debugging,
 - Never expose secrets or API keys.
 
 ## Available Tools
-You have these tools: Read, Edit, Write, Bash, Glob, Grep, LS.
+You have these tools: Read, Edit, Write, Bash, Yome, AskUser, TodoWrite, Glob, Grep, LS.
 - Use Read to view file contents.
 - Use Edit to modify existing files (find & replace with old_string/new_string).
 - Use Write to create new files.
-- Use Bash to run shell commands.
+- Use Bash for /bin/sh commands ONLY (ls, cat, git, mkdir, build/test runners, pipes…). It does NOT route to hub skills.
+- Use Yome to invoke installed hub-skill commands (xl, ppt, cal, fs, rem, …) — pass the command line exactly as a human would type it (e.g. \`xl books\`, \`ppt new ~/Desktop/x.pptx\`).
+- Use AskUser when requirements are ambiguous or you need the user to choose between trade-offs BEFORE doing irreversible work. Send 1–4 multiple-choice questions; do NOT include "Other" (the UI provides a custom-answer entry). Blocks until the user responds.
+- Use TodoWrite proactively whenever you start a task with 3+ meaningful steps. Always send the FULL list. Keep exactly ONE item in_progress at a time. Flip status the moment you start / finish a step — don't batch updates. Each item needs \`content\` (imperative) + \`activeForm\` (present continuous) + \`status\`.
 - Use Glob to find files by pattern.
 - Use Grep to search file contents.
 - Use LS to list directory contents.
@@ -196,7 +199,7 @@ function buildSkillsSection(skills: Skill[]): string {
  * the trigger / effects / entry triad.
  */
 function buildHubSkillsSection(entries: ReturnType<typeof getInstalledFast>): string {
-  let section = `\n## Installed Hub Skills\nUse the Bash tool: \`<domain> <action> [args]\` (no \`yome\` prefix, no SkillCall).\n\n`;
+  let section = `\n## Installed Hub Skills\nUse the **Yome** tool: \`<domain> <action> [args]\` (no \`yome\` prefix, no SkillCall, NOT the Bash tool).\nThe Bash tool is for /bin/sh ops only and will NOT route to skills.\n\n`;
   for (const e of entries) {
     const manifest = readManifest(e.installedAt);
     section += renderL1Block(e.domain, manifest, e.description) + '\n';

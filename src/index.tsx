@@ -2,7 +2,7 @@ import React from 'react';
 import { render } from 'ink';
 import meow from 'meow';
 import { App } from './ui/App.js';
-import { resolveConfig, saveStoredConfig, CONFIG_PATH } from './config.js';
+import { resolveConfig, saveStoredConfig, CONFIG_PATH, loadModelEntries, modelEntryToConfig } from './config.js';
 import { runSkillSubcommand, runLogin, runLogout, runWhoami } from './yomeSkills/cli.js';
 import { runThreadSubcommand } from './threadCli.js';
 
@@ -195,13 +195,20 @@ if (cli.flags.key || cli.flags.baseUrl || cli.flags.provider) {
   if (!cli.input.length) process.exit(0);
 }
 
-const config = resolveConfig(cli.flags);
+let config = resolveConfig(cli.flags);
 
 if (!config.apiKey) {
-  console.error('No API key found.');
-  console.error('Set via: yome --key sk-xxx');
-  console.error('Or set YOME_API_KEY environment variable.');
-  process.exit(1);
+  // Fall back to the first entry in ~/.yome/settings.json customModels if present.
+  const entries = loadModelEntries();
+  if (entries.length > 0) {
+    config = modelEntryToConfig(entries[0]);
+  } else {
+    console.error('No API key found.');
+    console.error('Set via: yome --key sk-xxx');
+    console.error('Or set YOME_API_KEY environment variable.');
+    console.error('Or add a model to ~/.yome/settings.json (customModels).');
+    process.exit(1);
+  }
 }
 
 // Only enter interactive mode if no recognized subcommand was provided

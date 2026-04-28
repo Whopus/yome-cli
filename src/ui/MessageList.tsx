@@ -115,6 +115,14 @@ interface MessageListProps {
   messages: Message[];
   streamText: string;
   isRunning: boolean;
+  /**
+   * Bumped by App.tsx whenever the conversation is reset (e.g. `/new` or
+   * session restore). We forward it onto Ink's <Static> via the `key` prop
+   * below — Ink's Static buffer is append-only and never drops items
+   * already committed to scrollback, so without remounting the user would
+   * still see the previous chat after typing /new.
+   */
+  resetEpoch?: number;
 }
 
 // ── Static + live split ──────────────────────────────────────────────
@@ -159,7 +167,7 @@ function partitionMessages(messages: Message[]): { staticMsgs: Message[]; liveMs
   return { staticMsgs, liveMsgs };
 }
 
-export const MessageList = React.memo(function MessageList({ messages, streamText, isRunning }: MessageListProps) {
+export const MessageList = React.memo(function MessageList({ messages, streamText, isRunning, resetEpoch = 0 }: MessageListProps) {
   const { staticMsgs, liveMsgs } = partitionMessages(messages);
 
   // Banner is item #0 of the Static stream, so Ink commits it to the
@@ -173,8 +181,13 @@ export const MessageList = React.memo(function MessageList({ messages, streamTex
 
   return (
     <>
-      {/* Frozen scrollback — banner first, then completed messages. */}
-      <Static items={staticItems}>
+      {/*
+        Frozen scrollback — banner first, then completed messages.
+        The `key` includes resetEpoch so `/new` (and session restore)
+        force a fresh Static instance: Ink's Static is append-only and
+        won't drop already-committed rows otherwise.
+      */}
+      <Static key={`static-${resetEpoch}`} items={staticItems}>
         {(item) => {
           if ('__banner' in item) {
             return <Banner key="banner" />;
