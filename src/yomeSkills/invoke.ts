@@ -7,14 +7,14 @@
 
 import { homedir } from 'os';
 import { getInstalledFast, type SkillIndexEntry } from './skillsIndex.js';
-import { readManifest, type SkillManifest } from './manifest.js';
+import { readManifest } from './manifest.js';
 import { isCapabilityAllowed } from './capabilities.js';
 import {
   dispatchMacos,
   loadMacosBackend,
   type SkillCall as DispatchCall,
-  type DispatchResult,
 } from '../skills/runner/dispatcher.js';
+import { dispatchNode, hasNodeBackend } from '../skills/runner/nodeBackend.js';
 
 /** Expand ~ in a path arg the same way a shell would. */
 function expandTilde(v: string | boolean | number | undefined): string | boolean | number | undefined {
@@ -107,54 +107,16 @@ export async function invokeSkill(req: InvokeRequest): Promise<InvokeResult> {
   //
   // The CLI is a Node process — NOT the macOS Yome.app host. So
   // `delivery.macos.backend === "bundled"` (= Swift code that lives
-  // inside Yome.app) is unreachable from here. Skills that need to drive
-  // native macOS apps from the CLI must ship a `backends/macos/` OTA
-  // AppleScript backend (manifest.json + per-action .applescript files),
-  // which the dispatcher renders into osascript invocations.
+  // inside Yome.app) is unreachable from here.
   //
-  // On non-darwin hosts there is no path at all today — return a clear
-  // diagnostic, don't silently fall through.
-  const platform = process.platform;
-  if (platform !== 'darwin') {
-    return {
-      ok: false, stdout: '',
-      stderr: `hub skill execution currently requires macOS (got ${platform})`,
-      exitCode: 1, resolvedSlug: entry.slug,
-    };
-  }
-
-  if (!loadMacosBackend(entry.installedAt)) {
-    // Explain WHY there's no usable backend, instead of the old terse
-    // "no macos backend installed". Most often: skill ships a bundled
-    // Swift impl (Yome.app only), no OTA AppleScript templates for CLI.
-    const delivery = (manifest.delivery ?? {}) as Record<string, { backend?: string } | undefined>;
-    const macosKind = delivery.macos?.backend;
-    const hints: string[] = [];
-    if (macosKind === 'bundled') {
-      hints.push(
-        'macOS implementation is "bundled" — runs inside Yome.app (Swift), ' +
-        'not from the CLI. Use the macOS app, or have the skill author publish ' +
-        'a backends/macos/ OTA AppleScript backend.',
-      );
-    } else {
-      hints.push('skill is missing backends/macos/manifest.json (no OTA AppleScript backend).');
-    }
-    return {
-      ok: false, stdout: '',
-      stderr:
-        `no macos backend the CLI can invoke for ${entry.slug}.\n` +
-        hints.map((h) => '  - ' + h).join('\n'),
-      exitCode: 2, resolvedSlug: entry.slug,
-    };
-  }
-
-  const r = await runMacos(entry, req);
-  return { ...r, resolvedSlug: entry.slug };
-}
-
-async function runMacos(entry: SkillIndexEntry, req: InvokeRequest): Promise<DispatchResult> {
-  // Expand ~ everywhere — AppleScript's `POSIX file "..."` doesn't honour
-  // tilde, and forcing the LLM to spell out /Users/me/... is annoying.
+  // Backend resolution order (first viable wins):
+  //   1. OTA Node backend (backends/node/) — works on every platform
+  //      and is the only path inside the daemon, headless, etc.
+  //   2. OTA macOS AppleScript backend (backends/macos/manifest.json) —
+  //      darwin-only; renders templates into osascript invocations.
+  //
+  // On non-darwin hosts the AppleScript option vanishes; we return a
+  // clear diagnostic if the skill has nothing else to fall back to.
   const positionals = (req.positionals ?? []).map((p) =>
     typeof p === 'string' ? (expandTilde(p) as string) : p,
   );
@@ -163,5 +125,48 @@ async function runMacos(entry: SkillIndexEntry, req: InvokeRequest): Promise<Dis
     flags[k] = expandTilde(v);
   }
   const call: DispatchCall = { positionals, flags };
-  return dispatchMacos(entry.installedAt, req.action, call);
+
+  // 1. Node backend — preferred when present (CLI is Node).
+  if (hasNodeBackend(entry.installedAt)) {
+    const r = await dispatchNode(entry.installedAt, req.action, call);
+    return { ...r, resolvedSlug: entry.slug };
+  }
+
+  // 2. macOS AppleScript backend.
+  const platform = process.platform;
+  if (platform !== 'darwin') {
+    return {
+      ok: false, stdout: '',
+      stderr:
+        `no node backend for ${entry.slug}, and host is ${platform} (macOS AppleScript ` +
+        `fallback unavailable). Ask the skill author to ship a backends/node/ OTA backend.`,
+      exitCode: 1, resolvedSlug: entry.slug,
+    };
+  }
+  if (!loadMacosBackend(entry.installedAt)) {
+    const delivery = (manifest.delivery ?? {}) as Record<string, { backend?: string } | undefined>;
+    const macosKind = delivery.macos?.backend;
+    const hints: string[] = [];
+    if (macosKind === 'bundled') {
+      hints.push(
+        'macOS implementation is "bundled" — runs inside Yome.app (Swift), ' +
+        'not from the CLI. Use the macOS app, or have the skill author publish ' +
+        'a backends/macos/ OTA AppleScript backend or a backends/node/ Node backend.',
+      );
+    } else {
+      hints.push('skill is missing backends/macos/manifest.json AND backends/node/ — no usable backend for the CLI.');
+    }
+    return {
+      ok: false, stdout: '',
+      stderr:
+        `no backend the CLI can invoke for ${entry.slug}.\n` +
+        hints.map((h) => '  - ' + h).join('\n'),
+      exitCode: 2, resolvedSlug: entry.slug,
+    };
+  }
+
+  const r = dispatchMacos(entry.installedAt, req.action, call);
+  return { ...r, resolvedSlug: entry.slug };
 }
+
+

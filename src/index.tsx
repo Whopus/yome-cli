@@ -5,6 +5,9 @@ import { App } from './ui/App.js';
 import { resolveConfig, saveStoredConfig, CONFIG_PATH, loadModelEntries, modelEntryToConfig } from './config.js';
 import { runSkillSubcommand, runLogin, runLogout, runWhoami } from './yomeSkills/cli.js';
 import { runThreadSubcommand } from './threadCli.js';
+import { runDaemonSubcommand } from './daemon/index.js';
+import { runCronSubcommand } from './daemon/cronCli.js';
+import { runTaskById } from './daemon/runTaskEntry.js';
 
 const cli = meow(
   `
@@ -20,6 +23,15 @@ const cli = meow(
                                       - https://github.com/owner/repo
     $ yome skill uninstall <slug>   Uninstall an installed skill (e.g. @yome/ppt)
     $ yome skill list               List installed skills
+
+  Daemon / Cron Subcommands
+    $ yome daemon install               Install LaunchAgent (auto-starts on login)
+    $ yome daemon start                 Start the daemon in the background
+    $ yome daemon status                Show daemon pid + active task count
+    $ yome cron add "<prompt>" --at "0 9 * * *"
+                                        Schedule an unattended agent task
+    $ yome cron list                    List scheduled tasks
+    $ yome cron logs <id> -f            Tail audit log for a task
 
   Thread Subcommands
     $ yome thread list                            List sessions in the current cwd
@@ -79,6 +91,23 @@ const cli = meow(
       replacedBy: { type: 'string' },
       version: { type: 'string' },
       allowDeprecated: { type: 'boolean' },
+      // daemon / cron flags
+      foreground: { type: 'boolean' },
+      follow: { type: 'boolean', shortFlag: 'f' },
+      at: { type: 'string' },
+      human: { type: 'string' },
+      once: { type: 'string' },
+      on: { type: 'string' },
+      path: { type: 'string' },
+      within: { type: 'string' },        // calendar lead time, e.g. "10m"
+      titleRegex: { type: 'string' },    // calendar title filter
+      calendar: { type: 'string' },      // calendar name filter
+      tz: { type: 'string' },
+      cwd: { type: 'string' },
+      allow: { type: 'string', isMultiple: true },
+      deny: { type: 'string', isMultiple: true },
+      maxMs: { type: 'string' },
+      env: { type: 'string', isMultiple: true },   // KEY=VAL, repeatable
     },
   },
 );
@@ -120,6 +149,44 @@ if (cli.input[0] === 'thread') {
   process.exit(exit);
 }
 
+// Internal: scheduler spawns `yome __run-task <id>` per fire.
+// Not exposed in --help; users go through `yome cron run`.
+if (cli.input[0] === '__run-task') {
+  const id = cli.input[1];
+  if (!id) { console.error('usage: yome __run-task <id>'); process.exit(2); }
+  process.exit(await runTaskById(id));
+}
+
+if (cli.input[0] === 'daemon') {
+  const exit = await runDaemonSubcommand(cli.input.slice(1), {
+    foreground: !!cli.flags.foreground,
+    follow: !!cli.flags.follow,
+  });
+  process.exit(exit);
+}
+
+if (cli.input[0] === 'cron') {
+  const exit = await runCronSubcommand(cli.input.slice(1), {
+    at: cli.flags.at,
+    human: cli.flags.human,
+    once: cli.flags.once,
+    on: cli.flags.on,
+    path: cli.flags.path,
+    within: cli.flags.within,
+    titleRegex: cli.flags.titleRegex,
+    calendar: cli.flags.calendar,
+    tz: cli.flags.tz,
+    cwd: cli.flags.cwd,
+    allow: cli.flags.allow,
+    deny: cli.flags.deny,
+    maxMs: cli.flags.maxMs,
+    env: cli.flags.env,
+    follow: !!cli.flags.follow,
+    json: !!cli.flags.json,
+  });
+  process.exit(exit);
+}
+
 if (cli.input[0] === 'doctor') {
   const { runDoctor } = await import('./yomeSkills/doctor.js');
   const report = runDoctor();
@@ -154,7 +221,7 @@ if (cli.input[0] === 'doctor') {
 //
 // Routes BEFORE the API-key check because skill calls don't need an LLM key.
 const RESERVED_TOP_LEVEL_DOMAINS = new Set([
-  'skill', 'login', 'logout', 'whoami', 'doctor', 'thread',
+  'skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', '__run-task',
 ]);
 if (
   cli.input.length >= 1 &&
@@ -171,7 +238,7 @@ if (
     // legitimately use --force as a per-action flag, and it's their semantics
     // — not the CLI-global `--force` of `yome skill install --force` — that
     // matters once we've decided this is a skill invocation.
-    return !/^--?(key|base-url|baseUrl|model|provider|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify|reason|replaced-by|replacedBy|version|allow-deprecated|allowDeprecated)(=|$)/.test(a);
+    return !/^--?(key|base-url|baseUrl|model|provider|verbose|skill|out|no-redact|noRedact|submit|case-id|caseId|dry-run|dryRun|json|yes|grant|revoke|skip-verify|skipVerify|reason|replaced-by|replacedBy|version|allow-deprecated|allowDeprecated|foreground|follow|f|at|human|once|on|path|tz|cwd|allow|deny|max-ms|maxMs)(=|$)/.test(a);
   });
   const commandLine = raw.map((a) => /\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a).join(' ');
   const k = await tryKernel(commandLine);
@@ -214,7 +281,7 @@ if (!config.apiKey) {
 // Only enter interactive mode if no recognized subcommand was provided
 if (
   cli.input.length === 0 ||
-  !['skill', 'login', 'logout', 'whoami', 'doctor', 'thread'].includes(cli.input[0])
+  !['skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', '__run-task'].includes(cli.input[0])
 ) {
   const initialPrompt = cli.input.join(' ') || undefined;
   const appConfig = initialPrompt
