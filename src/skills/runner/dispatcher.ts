@@ -176,6 +176,31 @@ export function parseColorToAppleScriptRGB(input: string): string | null {
 }
 
 /**
+ * `--type` alias → AppleScript `MsoAutoShapeType` enum literal. Unknown
+ * aliases degrade to `autoshape rectangle` so the template never emits
+ * broken AppleScript.
+ */
+export function parseAutoshapeToAppleScript(input: string): string {
+  switch (input.trim().toLowerCase()) {
+    case 'rectangle':     return 'autoshape rectangle';
+    case 'oval':          return 'autoshape oval';
+    case 'roundedrect':
+    case 'roundedrectangle': return 'autoshape rounded rectangle';
+    case 'triangle':      return 'autoshape isosceles triangle';
+    case 'rightarrow':    return 'autoshape right arrow';
+    case 'star5':
+    case 'star':          return 'autoshape five point star';
+    case 'pentagon':      return 'autoshape regular pentagon';
+    case 'diamond':       return 'autoshape diamond';
+    case 'hexagon':       return 'autoshape hexagon';
+    case 'cloud':         return 'autoshape cloud';
+    case 'lightningbolt': return 'autoshape lightning bolt';
+    case 'heart':         return 'autoshape heart';
+    default:              return 'autoshape rectangle';
+  }
+}
+
+/**
  * `--align` parser → AppleScript `paragraph align ...` enum.
  * Defaults silently to `paragraph align left` for unknown values; that
  * matches the Swift bridge behaviour and avoids breaking the script render.
@@ -223,6 +248,9 @@ function renderTemplate(tpl: string, ctx: Record<string, string | boolean | numb
     }
     if (filter === 'align') {
       return parseAlignToAppleScript(String(raw));
+    }
+    if (filter === 'autoshape') {
+      return parseAutoshapeToAppleScript(String(raw));
     }
     return String(raw);
   });
