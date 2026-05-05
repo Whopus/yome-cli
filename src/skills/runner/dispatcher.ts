@@ -122,57 +122,173 @@ function isTruthy(v: unknown): boolean {
   return false;
 }
 
-// Named CSS-ish colors that map to PowerPoint-friendly RGB triples.
-// Mirror of the Swift PowerPointBridge.colorToRGB lookup so cli + macos app
-// behave the same when a user types `--color=red`.
-const NAMED_COLORS: Record<string, [number, number, number]> = {
-  black:    [0, 0, 0],
-  white:    [255, 255, 255],
-  red:      [255, 0, 0],
-  green:    [0, 128, 0],
-  blue:     [0, 0, 255],
-  navy:     [0, 51, 102],
-  darkblue: [0, 51, 102],
-  yellow:   [255, 255, 0],
-  orange:   [255, 165, 0],
-  purple:   [128, 0, 128],
-  pink:     [255, 192, 203],
-  cyan:     [0, 255, 255],
-  gray:     [128, 128, 128],
-  grey:     [128, 128, 128],
+// Named colors that map to RGB triples. Superset of the CSS named-color list,
+// extended with a few CN-friendly aliases. Single source of truth on the CLI
+// side; the Swift bridges (PowerPointBridge / WordBridge / NumbersBridge /
+// PagesBridge / KeynoteBridge) intentionally mirror this table — when adding
+// or renaming an entry here, update those Swift maps in lockstep.
+export const NAMED_COLORS: Record<string, [number, number, number]> = {
+  // grayscale
+  black:        [0, 0, 0],
+  white:        [255, 255, 255],
+  gray:         [128, 128, 128],
+  grey:         [128, 128, 128],
+  silver:       [192, 192, 192],
+  lightgray:    [211, 211, 211],
+  lightgrey:    [211, 211, 211],
+  darkgray:     [169, 169, 169],
+  darkgrey:     [169, 169, 169],
+
+  // primaries / secondaries
+  red:          [255, 0, 0],
+  green:        [0, 128, 0],
+  lime:         [0, 255, 0],
+  blue:         [0, 0, 255],
+  yellow:       [255, 255, 0],
+  cyan:         [0, 255, 255],
+  aqua:         [0, 255, 255],
+  magenta:      [255, 0, 255],
+  fuchsia:      [255, 0, 255],
+
+  // common css
+  navy:         [0, 51, 102],
+  darkblue:     [0, 51, 102],
+  royalblue:    [65, 105, 225],
+  midnightblue: [25, 25, 112],
+  steelblue:    [70, 130, 180],
+  skyblue:      [135, 206, 235],
+  lightblue:    [173, 216, 230],
+  teal:         [0, 128, 128],
+  darkgreen:    [0, 100, 0],
+  lightgreen:   [144, 238, 144],
+  olive:        [128, 128, 0],
+  orange:       [255, 165, 0],
+  darkorange:   [255, 140, 0],
+  gold:         [255, 215, 0],
+  brown:        [165, 42, 42],
+  maroon:       [128, 0, 0],
+  crimson:      [220, 20, 60],
+  pink:         [255, 192, 203],
+  hotpink:      [255, 105, 180],
+  purple:       [128, 0, 128],
+  violet:       [238, 130, 238],
+  indigo:       [75, 0, 130],
+  beige:        [245, 245, 220],
+  ivory:        [255, 255, 240],
+  khaki:        [240, 230, 140],
+  tan:          [210, 180, 140],
+
+  // CN aliases (commonly used in prompts / docs)
+  '黑':         [0, 0, 0],
+  '黑色':       [0, 0, 0],
+  '白':         [255, 255, 255],
+  '白色':       [255, 255, 255],
+  '红':         [255, 0, 0],
+  '红色':       [255, 0, 0],
+  '蓝':         [0, 0, 255],
+  '蓝色':       [0, 0, 255],
+  '深蓝':       [0, 51, 102],
+  '海军蓝':     [0, 51, 102],
+  '绿':         [0, 128, 0],
+  '绿色':       [0, 128, 0],
+  '深绿':       [0, 100, 0],
+  '黄':         [255, 255, 0],
+  '黄色':       [255, 255, 0],
+  '橙':         [255, 165, 0],
+  '橙色':       [255, 165, 0],
+  '紫':         [128, 0, 128],
+  '紫色':       [128, 0, 128],
+  '粉':         [255, 192, 203],
+  '粉色':       [255, 192, 203],
+  '灰':         [128, 128, 128],
+  '灰色':       [128, 128, 128],
+  '浅灰':       [211, 211, 211],
+  '深灰':       [169, 169, 169],
+  '青':         [0, 255, 255],
+  '青色':       [0, 255, 255],
 };
 
+export interface ColorParseFailure {
+  input: string;
+  reason: string; // human-readable, never user-controlled
+}
+
 /**
- * Parse `red` | `#003366` | `003366` | `0, 51, 102` into an AppleScript
- * RGB literal `{r, g, b}`. Returns null if the input doesn't match any of
- * those three forms — callers should treat null as "user gave a bad color".
+ * Parse a color spec into an AppleScript RGB literal `{r, g, b}`.
+ *
+ * Accepted forms (case- and whitespace-insensitive):
+ *   • `#RRGGBB` or bare `RRGGBB`
+ *   • `R,G,B`  with each channel in 0..255
+ *   • Named color from NAMED_COLORS (CSS-ish + CN aliases)
+ *
+ * Returns `{ ok: true, literal }` on success, or `{ ok: false, error }` with
+ * a precise reason on failure. Callers MUST surface the error rather than
+ * silently emitting an empty literal — silent fallbacks were the root cause
+ * of the historical "bg disappeared from the format result" class of bugs.
  */
-export function parseColorToAppleScriptRGB(input: string): string | null {
-  const s = input.trim();
-  if (!s) return null;
+export type ColorParseResult =
+  | { ok: true; literal: string; rgb: [number, number, number] }
+  | { ok: false; error: ColorParseFailure };
+
+export function parseColor(input: string): ColorParseResult {
+  const raw = String(input ?? '');
+  const s = raw.trim();
+  if (!s) return { ok: false, error: { input: raw, reason: 'color is empty' } };
 
   // R,G,B
-  const csv = s.split(',').map((p) => p.trim());
-  if (csv.length === 3) {
-    const [r, g, b] = csv.map(Number);
-    if ([r, g, b].every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
-      return `{${r}, ${g}, ${b}}`;
+  if (s.includes(',')) {
+    const csv = s.split(',').map((p) => p.trim());
+    if (csv.length === 3) {
+      const [r, g, b] = csv.map(Number);
+      if ([r, g, b].every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+        return { ok: true, literal: `{${r}, ${g}, ${b}}`, rgb: [r!, g!, b!] };
+      }
+      return {
+        ok: false,
+        error: {
+          input: raw,
+          reason: 'looks like R,G,B but channels must be integers in 0..255',
+        },
+      };
     }
   }
 
-  // #RRGGBB or RRGGBB
+  // #RRGGBB or RRGGBB (only when the string is hex-shaped — never accept a
+  // bare named color as hex by accident, e.g. `cab` is not a color, `bed`
+  // would otherwise parse as #00bed0).
   let hex = s.toLowerCase();
   if (hex.startsWith('#')) hex = hex.slice(1);
-  if (/^[0-9a-f]{6}$/.test(hex)) {
+  if (/^[0-9a-f]{6}$/.test(hex) && (s.startsWith('#') || /^[0-9a-f]{6}$/.test(s.toLowerCase()))) {
     const v = parseInt(hex, 16);
-    return `{${(v >> 16) & 0xff}, ${(v >> 8) & 0xff}, ${v & 0xff}}`;
+    const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
+    return { ok: true, literal: `{${r}, ${g}, ${b}}`, rgb: [r, g, b] };
   }
 
   // named
-  const named = NAMED_COLORS[s.toLowerCase()];
-  if (named) return `{${named[0]}, ${named[1]}, ${named[2]}}`;
+  const key = s.toLowerCase();
+  const named = NAMED_COLORS[key] ?? NAMED_COLORS[s]; // CN keys aren't lowercased
+  if (named) {
+    return { ok: true, literal: `{${named[0]}, ${named[1]}, ${named[2]}}`, rgb: named };
+  }
 
-  return null;
+  return {
+    ok: false,
+    error: {
+      input: raw,
+      reason:
+        'unrecognised color (use #RRGGBB, R,G,B, or a named color like ' +
+        'red/blue/navy/teal/gray; full list in NAMED_COLORS)',
+    },
+  };
+}
+
+/**
+ * Back-compat wrapper that returns the literal or null. New code should use
+ * `parseColor()` so the failure reason can be surfaced to the user.
+ */
+export function parseColorToAppleScriptRGB(input: string): string | null {
+  const r = parseColor(input);
+  return r.ok ? r.literal : null;
 }
 
 /**
@@ -214,9 +330,43 @@ export function parseAlignToAppleScript(input: string): string {
   }
 }
 
-function renderTemplate(tpl: string, ctx: Record<string, string | boolean | number | null>): string {
+export interface RenderError {
+  arg: string;        // template variable name, e.g. "bg"
+  filter?: string;    // filter name, e.g. "rgb"
+  reason: string;     // human-readable
+}
+
+export interface RenderResult {
+  source: string;
+  errors: RenderError[];
+}
+
+/**
+ * Render an AppleScript template.
+ *
+ * Two failure modes exist:
+ *  - "soft": the filter accepts any input and just renders something
+ *    (`json`, `posix`, `bool`, `as_int`, `align`, `autoshape`). These never
+ *    populate `errors`.
+ *  - "hard": the filter validates input and can reject it (`rgb`). When
+ *    rejected we emit a syntactically VALID placeholder (`missing value`)
+ *    so the rendered AppleScript still parses, AND we record the error
+ *    in `errors[]`. The dispatcher checks `errors` BEFORE running osascript
+ *    and refuses to run with a structured message — no more silent failure
+ *    where `bg=深蓝` quietly emitted broken AppleScript.
+ *
+ * `{{name}}` / `{{name|filter}}` is the substitution syntax.
+ * `{{#if name}}…{{/if}}` is the conditional block (greedy, not nestable).
+ * Substitution happens AFTER conditionals, so a `{{#if bg}}…{{bg|rgb}}…{{/if}}`
+ * block whose `bg` was stripped never reaches the filter.
+ */
+export function renderTemplate(
+  tpl: string,
+  ctx: Record<string, string | boolean | number | null>,
+): RenderResult {
+  const errors: RenderError[] = [];
+
   // {{#if name}}...{{/if}} — block emitted only when ctx[name] is truthy.
-  // Greedy: not nestable. Sufficient for our skill templates.
   let out = tpl.replace(/\{\{#if\s+([\w-]+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g, (_, name: string, body: string) => {
     return isTruthy(ctx[name]) ? body : '';
   });
@@ -240,11 +390,19 @@ function renderTemplate(tpl: string, ctx: Record<string, string | boolean | numb
       return Number.isFinite(n) ? String(n) : '0';
     }
     if (filter === 'rgb') {
-      // Empty / unparseable color → empty literal so the surrounding
-      // {{#if name}} block degrades to "do nothing" instead of injecting
-      // syntactically broken AppleScript.
-      const lit = parseColorToAppleScriptRGB(String(raw));
-      return lit ?? '';
+      // An empty/false value means "user didn't pass this optional flag" —
+      // emit an empty literal so templates that do `set x to {{c|rgb}}`
+      // followed by `if x is not "" then …` keep working. We only validate
+      // when the user ACTUALLY provided a value.
+      const s = String(raw);
+      if (s === '' || raw === false) return '""';
+      const r = parseColor(s);
+      if (r.ok) return r.literal;
+      errors.push({ arg: name, filter: 'rgb', reason: `--${name}=${r.error.input}: ${r.error.reason}` });
+      // Emit a syntactically VALID AppleScript token so the surrounding
+      // script still parses — the dispatcher sees `errors[]` populated and
+      // refuses to run osascript anyway, but we want render to be total.
+      return 'missing value';
     }
     if (filter === 'align') {
       return parseAlignToAppleScript(String(raw));
@@ -255,7 +413,7 @@ function renderTemplate(tpl: string, ctx: Record<string, string | boolean | numb
     return String(raw);
   });
 
-  return out;
+  return { source: out, errors };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -314,7 +472,16 @@ export function dispatchMacos(
   let tpl = '';
   try { tpl = readFileSync(scriptPath, 'utf-8'); }
   catch (e) { return { ok: false, stdout: '', stderr: `read script failed: ${(e as Error).message}`, exitCode: 2 }; }
-  const source = renderTemplate(tpl, ctx);
+  const rendered = renderTemplate(tpl, ctx);
+  if (rendered.errors.length > 0) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: rendered.errors.map((e) => `[${action}] bad argument: ${e.reason}`).join('\n'),
+      exitCode: 2,
+    };
+  }
+  const source = rendered.source;
   if (process.env.YOME_DEBUG_SKILL === '1') {
     process.stderr.write(`── rendered ${actionSpec.script} ──\n${source}\n── end ──\n`);
   }
@@ -333,7 +500,15 @@ export function dispatchMacos(
     if (actionSpec.pollScript) {
       const p = join(skillDir, 'backends', 'macos', actionSpec.pollScript);
       if (existsSync(p)) {
-        pollSrc = renderTemplate(readFileSync(p, 'utf-8'), ctx);
+        const r = renderTemplate(readFileSync(p, 'utf-8'), ctx);
+        if (r.errors.length > 0) {
+          return {
+            ok: false, stdout: '',
+            stderr: r.errors.map((e) => `[${action}.poll] bad argument: ${e.reason}`).join('\n'),
+            exitCode: 2,
+          };
+        }
+        pollSrc = r.source;
       }
     }
     if (!pollSrc) pollSrc = source; // fallback: poll with the main script
@@ -435,11 +610,23 @@ export async function dispatchMacosBatchMerged(
     }
     const tpl = readFileSync(scriptPath, 'utf-8');
     const rendered = renderTemplate(tpl, ctx);
+    if (rendered.errors.length > 0) {
+      // Fail the whole batch BEFORE running osascript: a render error in
+      // one step (e.g. a bad color name) used to silently emit broken
+      // AppleScript and produce a confusing "OK" line. Surface it loudly.
+      return {
+        ok: false, stdout: '',
+        stderr:
+          `merge: line ${i + 1} (${e.action}): ` +
+          rendered.errors.map((er) => er.reason).join('; '),
+        exitCode: 2,
+      };
+    }
 
     // Wrap each rendered block in a try so a single failure doesn't kill
     // the whole script. We capture per-step result into a list so the
     // outer return can report the full status TSV.
-    blocks.push(buildMergedBlock(i, e.action, rendered, opts.keepGoing));
+    blocks.push(buildMergedBlock(i, e.action, rendered.source, opts.keepGoing));
   }
 
   const finalSource = `
@@ -461,8 +648,14 @@ return results as string
 
   // Parse per-step lines from osascript stdout. Each line:
   //   "<status>\t<idx>\t<action>\t<msg>"
+  //
+  // The `<msg>` for partial-success-aware actions (xl/ppt/doc fmt, cf, …)
+  // follows the convention "<okList>|<failList>" — when failList is non-empty
+  // the step is reported as a partial failure even though osascript itself
+  // returned without throwing. Without this demux a `fmt` whose `bg` silently
+  // failed would still be counted as ✓ in the batch summary.
   const lines = r.stdout.split(/\n/).filter(Boolean);
-  let okCount = 0, failCount = 0;
+  let okCount = 0, partialCount = 0, failCount = 0;
   const summary: string[] = [];
   for (const line of lines) {
     const parts = line.split('\t');
@@ -471,25 +664,54 @@ return results as string
     const action = parts[2] ?? '?';
     const msg = parts.slice(3).join('\t');
     if (status === 'OK') {
-      okCount++;
-      summary.push(`✓ [${idx}] ${action}${msg ? ': ' + msg : ''}`);
+      const partial = parsePartialOkFail(msg);
+      if (partial && partial.fail) {
+        partialCount++;
+        const okPart = partial.ok ? `ok=[${partial.ok}] ` : '';
+        summary.push(`⚠ [${idx}] ${action}: ${okPart}failed=[${partial.fail}]`);
+      } else {
+        okCount++;
+        summary.push(`✓ [${idx}] ${action}${msg ? ': ' + msg : ''}`);
+      }
     } else {
       failCount++;
       summary.push(`✗ [${idx}] ${action}: ${msg}`);
     }
   }
 
+  const totalFail = failCount + partialCount;
   const tail =
-    failCount === 0
+    totalFail === 0
       ? `\n— merged batch ok (${entries.length} commands, single osascript)`
-      : `\n— merged batch: ${okCount}/${entries.length} ok, ${failCount} failed`;
+      : `\n— merged batch: ${okCount}/${entries.length} ok` +
+        (partialCount ? `, ${partialCount} partial` : '') +
+        (failCount ? `, ${failCount} failed` : '');
 
+  const stderrParts: string[] = [];
+  if (failCount) stderrParts.push(`${failCount} step(s) failed`);
+  if (partialCount) stderrParts.push(`${partialCount} step(s) partially failed`);
   return {
-    ok: failCount === 0,
+    ok: totalFail === 0,
     stdout: summary.join('\n') + tail,
-    stderr: failCount === 0 ? '' : `${failCount} step(s) failed (see stdout for details)`,
-    exitCode: failCount === 0 ? 0 : 1,
+    stderr: stderrParts.length ? stderrParts.join('; ') + ' (see stdout for details)' : '',
+    exitCode: totalFail === 0 ? 0 : 1,
   };
+}
+
+/**
+ * Demux the "<okList>|<failList>" convention used by partial-success-aware
+ * AppleScript templates (xl/ppt/doc `fmt`, `cf`, …). Returns null when the
+ * payload doesn't look like that shape — callers should treat null as
+ * "ordinary opaque message, leave it alone".
+ */
+export function parsePartialOkFail(msg: string): { ok: string; fail: string } | null {
+  // Conservative: only one '|' separator at the top level. We don't try to
+  // be clever about escaping because the templates that emit this shape only
+  // produce comma-separated identifiers + AppleScript error messages on the
+  // right (which never contain `|` in practice).
+  const i = msg.indexOf('|');
+  if (i < 0) return null;
+  return { ok: msg.slice(0, i), fail: msg.slice(i + 1) };
 }
 
 /**
