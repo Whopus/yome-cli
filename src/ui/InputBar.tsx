@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { Box, Text, useStdout } from 'ink';
 import type { PermissionMode } from '../permissions/types.js';
+import { MultilineTextInput } from './MultilineTextInput.js';
 
 export interface SlashCommand {
   name: string;
@@ -38,7 +38,7 @@ function getPermissionLabel(mode: PermissionMode): { text: string; color: string
 
 export function InputBar({ value, onChange, onSubmit, model, loopName, slashCommands = [], permissionMode = 'default', imageCount = 0 }: InputBarProps) {
   const [cursor, setCursor] = useState(0);
-  const suppressNextChange = useRef(false);
+  const { stdout } = useStdout();
 
   const filtered = useMemo(() => {
     if (!value.startsWith('/')) return [];
@@ -46,47 +46,31 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
     return slashCommands.filter((c) => c.name.toLowerCase().startsWith(query));
   }, [value, slashCommands]);
 
-  const showSuggestions = filtered.length > 0 && value.startsWith('/') && !value.includes(' ');
+  const showSuggestions = filtered.length > 0 && value.startsWith('/') && !/\s/.test(value.slice(1));
 
-  useMemo(() => {
+  useEffect(() => {
     setCursor(0);
   }, [filtered.length]);
 
-  const handleChange = useCallback((v: string) => {
-    if (suppressNextChange.current) {
-      suppressNextChange.current = false;
-      return;
-    }
-    onChange(v);
-  }, [onChange]);
-
-  const handleSubmit = useCallback((v: string) => {
+  const handleAcceptSuggestion = useCallback((submit: boolean): string | null => {
     if (showSuggestions && filtered[cursor]) {
       const selected = '/' + filtered[cursor]!.name;
       onChange(selected);
-      onSubmit(selected);
-    } else {
-      onSubmit(v);
+      if (submit) onSubmit(selected);
+      return selected;
     }
+    return null;
   }, [showSuggestions, filtered, cursor, onChange, onSubmit]);
 
-  useInput((input, key) => {
-    // Suppress Ctrl+V so ink-text-input doesn't insert 'v'
-    if (key.ctrl && input === 'v') {
-      suppressNextChange.current = true;
-      return;
-    }
-    if (!showSuggestions) return;
-    if (key.upArrow) {
+  const handleNavigateSuggestion = useCallback((direction: 'up' | 'down'): boolean => {
+    if (!showSuggestions) return false;
+    if (direction === 'up') {
       setCursor((prev) => (prev > 0 ? prev - 1 : filtered.length - 1));
-    } else if (key.downArrow) {
+    } else {
       setCursor((prev) => (prev < filtered.length - 1 ? prev + 1 : 0));
-    } else if (key.tab) {
-      if (filtered[cursor]) {
-        onChange('/' + filtered[cursor]!.name);
-      }
     }
-  });
+    return true;
+  }, [showSuggestions, filtered.length]);
 
   const maxNameLen = showSuggestions
     ? Math.max(...filtered.map((c) => c.name.length))
@@ -107,6 +91,8 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
   const hasScrollDown = visibleStart + MAX_VISIBLE < filtered.length;
 
   const perm = getPermissionLabel(permissionMode);
+  const terminalColumns = stdout.columns ?? process.stdout.columns ?? 80;
+  const inputColumns = Math.max(10, terminalColumns - 8);
 
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -120,13 +106,16 @@ export function InputBar({ value, onChange, onSubmit, model, loopName, slashComm
           <Text dimColor> (press Enter to send)</Text>
         </Box>
       )}
-      <Box borderStyle="round" borderColor="gray" paddingX={1}>
-        <Text color="#E87B35">{`> `}</Text>
-        <TextInput
+      <Box borderStyle="round" borderColor="gray" paddingX={1} width="100%">
+        <MultilineTextInput
           value={value}
-          onChange={handleChange}
-          onSubmit={handleSubmit}
-          placeholder=""
+          onChange={onChange}
+          onSubmit={onSubmit}
+          columns={inputColumns}
+          prompt="> "
+          promptColor="#E87B35"
+          onNavigateSuggestion={handleNavigateSuggestion}
+          onAcceptSuggestion={handleAcceptSuggestion}
         />
       </Box>
       {showSuggestions && (
