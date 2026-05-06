@@ -53,6 +53,7 @@ const DEFAULT_BASE_URL = 'https://zenmux.ai/api';
 const OPENAI_COMPATIBLE_HOSTS = [
   'api.openai.com', 'api.deepseek.com', 'api.groq.com',
   'api.together.xyz', 'openrouter.ai',
+  'api.minimax.io', 'api.minimaxi.com',
 ];
 const OPENAI_COMPATIBLE_PATHS = ['/compatible-mode', '/v1/chat'];
 
@@ -66,6 +67,35 @@ export function detectProvider(baseUrl: string): 'anthropic' | 'openai' {
   return 'anthropic';
 }
 
+export function isMiniMaxUrl(baseUrl: string): boolean {
+  try {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname.includes('minimax.io') || hostname.includes('minimaxi.com');
+  } catch {
+    return false;
+  }
+}
+
+/** Built-in MiniMax model definitions. */
+export const MINIMAX_MODELS: ModelEntry[] = [
+  {
+    id: 'minimax-m2.7',
+    displayName: 'MiniMax-M2.7',
+    model: 'MiniMax-M2.7',
+    baseUrl: 'https://api.minimax.io/v1',
+    apiKey: '',
+    provider: 'openai',
+  },
+  {
+    id: 'minimax-m2.7-highspeed',
+    displayName: 'MiniMax-M2.7 Highspeed',
+    model: 'MiniMax-M2.7-highspeed',
+    baseUrl: 'https://api.minimax.io/v1',
+    apiKey: '',
+    provider: 'openai',
+  },
+];
+
 export function resolveConfig(flags: {
   key?: string;
   baseUrl?: string;
@@ -74,7 +104,6 @@ export function resolveConfig(flags: {
 }): YomeConfig {
   const stored = loadStoredConfig();
 
-  const apiKey = flags.key || process.env.YOME_API_KEY || stored.apiKey || '';
   const baseUrl = (flags.baseUrl || process.env.YOME_BASE_URL || stored.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
   const model = flags.model || process.env.YOME_MODEL || stored.model;
 
@@ -85,6 +114,10 @@ export function resolveConfig(flags: {
   } else {
     provider = detectProvider(baseUrl);
   }
+
+  // Support MINIMAX_API_KEY as a convenience alias when targeting MiniMax endpoints.
+  const minimaxKey = isMiniMaxUrl(baseUrl) ? process.env.MINIMAX_API_KEY : undefined;
+  const apiKey = flags.key || process.env.YOME_API_KEY || minimaxKey || stored.apiKey || '';
 
   return { apiKey, baseUrl, model, provider };
 }
@@ -118,29 +151,43 @@ interface SettingsJson {
 
 /**
  * Load custom model entries from ~/.yome/settings.json.
+ * Built-in MiniMax models are automatically included when MINIMAX_API_KEY is set.
  */
 export function loadModelEntries(): ModelEntry[] {
-  try {
-    if (!existsSync(SETTINGS_FILE)) return [];
-    const raw = readFileSync(SETTINGS_FILE, 'utf-8').trim();
-    if (!raw) return [];
-    const data: SettingsJson = JSON.parse(raw);
-    if (!Array.isArray(data.customModels)) return [];
+  const custom: ModelEntry[] = (() => {
+    try {
+      if (!existsSync(SETTINGS_FILE)) return [];
+      const raw = readFileSync(SETTINGS_FILE, 'utf-8').trim();
+      if (!raw) return [];
+      const data: SettingsJson = JSON.parse(raw);
+      if (!Array.isArray(data.customModels)) return [];
 
-    return data.customModels
-      .filter((m) => m.model && m.baseUrl && m.apiKey)
-      .map((m) => ({
-        id: m.id ?? m.model!,
-        displayName: m.displayName ?? m.model!,
-        model: m.model!,
-        baseUrl: m.baseUrl!.replace(/\/+$/, ''),
-        apiKey: m.apiKey!,
-        provider: (m.provider === 'openai' ? 'openai' : 'anthropic') as 'anthropic' | 'openai',
-        maxOutputTokens: m.maxOutputTokens,
-      }));
-  } catch {
-    return [];
-  }
+      return data.customModels
+        .filter((m) => m.model && m.baseUrl && m.apiKey)
+        .map((m) => ({
+          id: m.id ?? m.model!,
+          displayName: m.displayName ?? m.model!,
+          model: m.model!,
+          baseUrl: m.baseUrl!.replace(/\/+$/, ''),
+          apiKey: m.apiKey!,
+          provider: (m.provider === 'openai' ? 'openai' : 'anthropic') as 'anthropic' | 'openai',
+          maxOutputTokens: m.maxOutputTokens,
+        }));
+    } catch {
+      return [];
+    }
+  })();
+
+  // Inject built-in MiniMax models when MINIMAX_API_KEY is present and no custom
+  // MiniMax entries already override them.
+  const minimaxApiKey = process.env.MINIMAX_API_KEY;
+  const builtinMiniMax: ModelEntry[] = minimaxApiKey
+    ? MINIMAX_MODELS.map((m) => ({ ...m, apiKey: minimaxApiKey })).filter(
+        (bm) => !custom.some((c) => c.id === bm.id || c.model === bm.model),
+      )
+    : [];
+
+  return [...builtinMiniMax, ...custom];
 }
 
 /**

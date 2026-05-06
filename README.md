@@ -267,6 +267,20 @@ Or persist once into `~/.yome/config.json`:
 yome --key sk-... --base-url https://… --model …
 ```
 
+### MiniMax
+
+Set `MINIMAX_API_KEY` and point `YOME_BASE_URL` at the MiniMax endpoint — the provider is auto-detected:
+
+```bash
+export MINIMAX_API_KEY=your-minimax-api-key
+export YOME_BASE_URL=https://api.minimax.io/v1
+export YOME_MODEL=MiniMax-M2.7           # or MiniMax-M2.7-highspeed
+
+yome
+```
+
+When `MINIMAX_API_KEY` is set, `MiniMax-M2.7` and `MiniMax-M2.7-highspeed` appear automatically in the model picker (`/` to open). The `MINIMAX_API_KEY` is also accepted as an alias for `YOME_API_KEY` when targeting `api.minimax.io`.
+
 **Storage layout:**
 
 ```
