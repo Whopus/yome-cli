@@ -1,5 +1,6 @@
 import type { YomeConfig } from './config.js';
 import type { AgentMessage, AnthropicTool, AnthropicResponse, ContentBlock } from './types.js';
+import { withRetry } from './withRetry.js';
 
 type StreamCallback = (event: {
   type: 'text_delta' | 'tool_use_start' | 'tool_input_delta' | 'content_block_stop' | 'message_stop';
@@ -9,8 +10,56 @@ type StreamCallback = (event: {
   toolName?: string;
 }) => void;
 
-const MAX_RETRIES = 3;
-const RETRY_DELAYS = [1000, 3000, 8000];
+// Abort the stream when no SSE chunks have arrived for this long. Without
+// this a silently half-closed TCP connection from the upstream gateway can
+// hang the CLI indefinitely. Override via YOME_STREAM_IDLE_MS.
+const STREAM_IDLE_MS = parseInt(process.env.YOME_STREAM_IDLE_MS ?? '', 10) || 60_000;
+const STREAM_WARN_MS = Math.max(5_000, Math.floor(STREAM_IDLE_MS / 2));
+
+class StreamIdleTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Stream idle timeout: no chunks received for ${Math.round(ms / 1000)}s`);
+    this.name = 'StreamIdleTimeoutError';
+  }
+}
+
+interface IdleWatchdog {
+  signal: AbortSignal;
+  reset: () => void;
+  dispose: () => void;
+}
+
+function createIdleWatchdog(outerSignal?: AbortSignal): IdleWatchdog {
+  const ctrl = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let warnTimer: ReturnType<typeof setTimeout> | null = null;
+  const clear = () => {
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (warnTimer) { clearTimeout(warnTimer); warnTimer = null; }
+  };
+  const reset = () => {
+    clear();
+    warnTimer = setTimeout(() => {
+      console.warn(`[yome-llm] stream idle warning: no chunks for ${STREAM_WARN_MS / 1000}s`);
+    }, STREAM_WARN_MS);
+    idleTimer = setTimeout(() => {
+      ctrl.abort(new StreamIdleTimeoutError(STREAM_IDLE_MS));
+    }, STREAM_IDLE_MS);
+  };
+  const onOuterAbort = () => ctrl.abort(outerSignal?.reason ?? new Error('aborted'));
+  if (outerSignal) {
+    if (outerSignal.aborted) ctrl.abort(outerSignal.reason);
+    else outerSignal.addEventListener('abort', onOuterAbort, { once: true });
+  }
+  return {
+    signal: ctrl.signal,
+    reset,
+    dispose: () => {
+      clear();
+      if (outerSignal) outerSignal.removeEventListener('abort', onOuterAbort);
+    },
+  };
+}
 
 // ── Context window management ───────────────────────────────────────
 //
@@ -55,34 +104,19 @@ function trimMessageHistory(messages: AgentMessage[]): AgentMessage[] {
   return [head, elision, ...tail];
 }
 
-async function fetchWithRetry(
+// HTTP layer is intentionally dumb now — retry lives in `withRetry`, which
+// also understands stream-idle timeouts and network-layer errors that a
+// status-code-only wrapper could never see.
+async function postJson(
   url: string,
   init: RequestInit,
-  retries = MAX_RETRIES,
 ): Promise<Response> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const response = await fetch(url, init);
-
-    if (response.ok) return response;
-
-    const status = response.status;
-    const isRetryable = status === 429 || status === 500 || status === 502 || status === 503;
-
-    if (!isRetryable || attempt === retries) {
-      const error = await response.text();
-      throw new Error(`API error ${status}: ${error}`);
-    }
-
-    // Respect Retry-After header or use exponential backoff
-    const retryAfter = response.headers.get('retry-after');
-    const delay = retryAfter
-      ? parseInt(retryAfter, 10) * 1000
-      : RETRY_DELAYS[attempt] ?? 8000;
-
-    await new Promise((r) => setTimeout(r, delay));
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`API error ${response.status}: ${error}`);
   }
-
-  throw new Error('Unreachable');
+  return response;
 }
 
 // ── OpenAI-compatible format conversion ──
@@ -161,6 +195,7 @@ async function callOpenAIStream(
   messages: AgentMessage[],
   tools: AnthropicTool[],
   onEvent: StreamCallback,
+  signal?: AbortSignal,
 ): Promise<AnthropicResponse> {
   const trimmed = trimMessageHistory(messages);
   const body: Record<string, unknown> = {
@@ -171,27 +206,32 @@ async function callOpenAIStream(
   };
   if (tools.length > 0) body.tools = toOpenAITools(tools);
 
-  const response = await fetchWithRetry(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const watchdog = createIdleWatchdog(signal);
+  try {
+    const response = await postJson(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: watchdog.signal,
+    });
 
-  let textContent = '';
-  const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
-  let inputTokens = 0;
-  let outputTokens = 0;
+    let textContent = '';
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+    let inputTokens = 0;
+    let outputTokens = 0;
 
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+    watchdog.reset();
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      watchdog.reset();
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
@@ -235,22 +275,25 @@ async function callOpenAIStream(
     }
   }
 
-  onEvent({ type: 'message_stop' });
+    onEvent({ type: 'message_stop' });
 
-  const contentBlocks: ContentBlock[] = [];
-  if (textContent) contentBlocks.push({ type: 'text', text: textContent });
-  for (const [, tc] of toolCalls) {
-    let parsedInput = {};
-    try { parsedInput = JSON.parse(tc.arguments || '{}'); } catch { /* */ }
-    contentBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: parsedInput });
+    const contentBlocks: ContentBlock[] = [];
+    if (textContent) contentBlocks.push({ type: 'text', text: textContent });
+    for (const [, tc] of toolCalls) {
+      let parsedInput = {};
+      try { parsedInput = JSON.parse(tc.arguments || '{}'); } catch { /* */ }
+      contentBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: parsedInput });
+    }
+
+    return {
+      id: '',
+      content: contentBlocks,
+      stop_reason: toolCalls.size > 0 ? 'tool_use' : 'end_turn',
+      usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    };
+  } finally {
+    watchdog.dispose();
   }
-
-  return {
-    id: '',
-    content: contentBlocks,
-    stop_reason: toolCalls.size > 0 ? 'tool_use' : 'end_turn',
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
-  };
 }
 
 // ── Anthropic stream parser ──
@@ -261,6 +304,7 @@ async function callAnthropicNativeStream(
   messages: AgentMessage[],
   tools: AnthropicTool[],
   onEvent: StreamCallback,
+  signal?: AbortSignal,
 ): Promise<AnthropicResponse> {
   const trimmed = trimMessageHistory(messages);
   const body: Record<string, unknown> = {
@@ -272,30 +316,35 @@ async function callAnthropicNativeStream(
   };
   if (tools.length > 0) body.tools = tools;
 
-  const response = await fetchWithRetry(`${config.baseUrl}/v1/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  });
+  const watchdog = createIdleWatchdog(signal);
+  try {
+    const response = await postJson(`${config.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+      signal: watchdog.signal,
+    });
 
-  const contentBlocks: ContentBlock[] = [];
-  let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' = 'end_turn';
-  let inputTokens = 0;
-  let outputTokens = 0;
-  const toolInputBuffers = new Map<number, { id: string; name: string; input: string }>();
+    const contentBlocks: ContentBlock[] = [];
+    let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' = 'end_turn';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const toolInputBuffers = new Map<number, { id: string; name: string; input: string }>();
 
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+    watchdog.reset();
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      watchdog.reset();
+      buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
 
@@ -358,17 +407,28 @@ async function callAnthropicNativeStream(
     }
   }
 
-  onEvent({ type: 'message_stop' });
+    onEvent({ type: 'message_stop' });
 
-  return {
-    id: '',
-    content: contentBlocks,
-    stop_reason: stopReason,
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
-  };
+    return {
+      id: '',
+      content: contentBlocks,
+      stop_reason: stopReason,
+      usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    };
+  } finally {
+    watchdog.dispose();
+  }
 }
 
 // ── Public API: auto-routes by provider ──
+
+export interface CallLLMOptions {
+  signal?: AbortSignal;
+  /** Forwarded to withRetry. Default 4 (= 5 total attempts). */
+  maxRetries?: number;
+  /** Fires before each backoff sleep so callers can surface a "retrying" toast. */
+  onRetryNotice?: (n: { attempt: number; maxRetries: number; delayMs: number; error: string }) => void;
+}
 
 export function callLLMStream(
   config: YomeConfig,
@@ -376,11 +436,22 @@ export function callLLMStream(
   messages: AgentMessage[],
   tools: AnthropicTool[],
   onEvent: StreamCallback,
+  options: CallLLMOptions = {},
 ): Promise<AnthropicResponse> {
-  if (config.provider === 'openai') {
-    return callOpenAIStream(config, systemPrompt, messages, tools, onEvent);
-  }
-  return callAnthropicNativeStream(config, systemPrompt, messages, tools, onEvent);
+  return withRetry(
+    () => {
+      if (config.provider === 'openai') {
+        return callOpenAIStream(config, systemPrompt, messages, tools, onEvent, options.signal);
+      }
+      return callAnthropicNativeStream(config, systemPrompt, messages, tools, onEvent, options.signal);
+    },
+    {
+      signal: options.signal,
+      maxRetries: options.maxRetries,
+      label: config.provider === 'openai' ? 'cli-openai' : 'cli-anthropic',
+      onRetryNotice: options.onRetryNotice,
+    },
+  );
 }
 
 export function callLLM(
@@ -388,9 +459,10 @@ export function callLLM(
   systemPrompt: string,
   messages: AgentMessage[],
   tools: AnthropicTool[] = [],
+  options: CallLLMOptions = {},
 ): Promise<AnthropicResponse> {
   const noop: StreamCallback = () => {};
-  return callLLMStream(config, systemPrompt, messages, tools, noop);
+  return callLLMStream(config, systemPrompt, messages, tools, noop, options);
 }
 
 export function extractText(response: AnthropicResponse): string {
