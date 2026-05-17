@@ -14,6 +14,7 @@ import { readFileSync, existsSync, openSync } from 'fs';
 import { spawn } from 'child_process';
 import { startDaemon, readPidIfRunning } from './scheduler.js';
 import { installLaunchAgent, uninstallLaunchAgent } from './launchd.js';
+import { installSystemdUnit, uninstallSystemdUnit } from './systemd.js';
 import { listTasks } from './taskStore.js';
 import { resolveYomeBinPath } from './triggers/cron.js';
 import { PID_FILE, STDOUT_LOG, STDERR_LOG, ensureDirs } from './paths.js';
@@ -63,14 +64,18 @@ See also: yome cron --help`);
 }
 
 function doInstall(): number {
-  const r = installLaunchAgent(resolveYomeBinPath());
+  const r = process.platform === 'linux'
+    ? installSystemdUnit(resolveYomeBinPath())
+    : installLaunchAgent(resolveYomeBinPath());
   if (r.ok) { console.log(`✓ ${r.message}`); return 0; }
   console.error(`✗ ${r.message}`);
   return 1;
 }
 
 function doUninstall(): number {
-  const r = uninstallLaunchAgent();
+  const r = process.platform === 'linux'
+    ? uninstallSystemdUnit()
+    : uninstallLaunchAgent();
   if (r.ok) { console.log(`✓ ${r.message}`); return 0; }
   console.error(`✗ ${r.message}`);
   return 1;

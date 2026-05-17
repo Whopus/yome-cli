@@ -8,6 +8,7 @@ import { runThreadSubcommand } from './threadCli.js';
 import { runDaemonSubcommand } from './daemon/index.js';
 import { runCronSubcommand } from './daemon/cronCli.js';
 import { runTaskById } from './daemon/runTaskEntry.js';
+import { runMeshSubcommand } from './commands/mesh.js';
 
 const cli = meow(
   `
@@ -15,6 +16,15 @@ const cli = meow(
     $ yome [prompt]
     $ yome skill <subcommand>
     $ yome thread <subcommand>
+    $ yome mesh <subcommand>
+
+  Mesh Subcommands
+    $ yome mesh start [--foreground]    Connect this box to Yome Cloud as a mesh device
+    $ yome mesh stop                    Stop the background mesh daemon
+    $ yome mesh status                  Show mesh daemon status + device id
+    $ yome mesh logs [-f]               Print / tail the mesh daemon log
+    $ yome mesh info                    Show user + device id + capabilities
+    $ yome mesh rename <alias> [desc]   Set this device's display alias
 
   Skill Subcommands
     $ yome skill install <source>   Install a skill. <source> can be:
@@ -108,6 +118,9 @@ const cli = meow(
       deny: { type: 'string', isMultiple: true },
       maxMs: { type: 'string' },
       env: { type: 'string', isMultiple: true },   // KEY=VAL, repeatable
+      // mesh flags
+      as: { type: 'string' },              // `yome mesh start --as <hostname>`
+      hubBase: { type: 'string' },         // dev override for hub base URL
     },
   },
 );
@@ -161,6 +174,16 @@ if (cli.input[0] === 'daemon') {
   const exit = await runDaemonSubcommand(cli.input.slice(1), {
     foreground: !!cli.flags.foreground,
     follow: !!cli.flags.follow,
+  });
+  process.exit(exit);
+}
+
+if (cli.input[0] === 'mesh') {
+  const exit = await runMeshSubcommand(cli.input.slice(1), {
+    foreground: !!cli.flags.foreground,
+    follow: !!cli.flags.follow,
+    as: typeof cli.flags.as === 'string' ? cli.flags.as : undefined,
+    hubBase: typeof cli.flags.hubBase === 'string' ? cli.flags.hubBase : undefined,
   });
   process.exit(exit);
 }
@@ -221,7 +244,7 @@ if (cli.input[0] === 'doctor') {
 //
 // Routes BEFORE the API-key check because skill calls don't need an LLM key.
 const RESERVED_TOP_LEVEL_DOMAINS = new Set([
-  'skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', '__run-task',
+  'skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', 'mesh', '__run-task',
 ]);
 if (
   cli.input.length >= 1 &&
@@ -281,7 +304,7 @@ if (!config.apiKey) {
 // Only enter interactive mode if no recognized subcommand was provided
 if (
   cli.input.length === 0 ||
-  !['skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', '__run-task'].includes(cli.input[0])
+  !['skill', 'login', 'logout', 'whoami', 'doctor', 'thread', 'daemon', 'cron', 'mesh', '__run-task'].includes(cli.input[0])
 ) {
   const initialPrompt = cli.input.join(' ') || undefined;
   const appConfig = initialPrompt
