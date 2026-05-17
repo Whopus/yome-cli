@@ -122,6 +122,8 @@ const cli = meow(
       as: { type: 'string' },              // `yome mesh start --as <hostname>`
       hubBase: { type: 'string' },         // dev override for hub base URL
       tui: { type: 'boolean' },            // `yome mesh start --tui` mounts a thin-client TUI
+      // login flag
+      github: { type: 'boolean' },         // `yome login --github` forces GitHub Device Flow
     },
   },
 );
@@ -146,7 +148,7 @@ if (cli.input[0] === 'skill') {
 }
 
 // Top-level auth commands (`yome login` / `logout` / `whoami`)
-if (cli.input[0] === 'login')  { process.exit(await runLogin()); }
+if (cli.input[0] === 'login')  { process.exit(await runLogin({ github: !!cli.flags.github })); }
 if (cli.input[0] === 'logout') { process.exit(await runLogout()); }
 if (cli.input[0] === 'whoami') { process.exit(await runWhoami()); }
 

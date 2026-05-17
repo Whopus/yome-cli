@@ -8,6 +8,7 @@ import { uninstallBySlug } from './uninstall.js';
 import { getYomeSkillsRoot } from './paths.js';
 import { pingHubInstall } from './hubPing.js';
 import { performLogin } from './login.js';
+import { performWebLogin } from './webLogin.js';
 import { readAuthState, clearAuthState } from './auth.js';
 import { setSkillEnabled, isSkillDisabled } from './enable.js';
 import { updateSkills } from './update.js';
@@ -88,12 +89,39 @@ export async function runSkillSubcommand(args: string[], flags: SkillCliFlags): 
 
 const HUB_BASE = (process.env.YOME_HUB_BASE || 'https://yome.work').replace(/\/+$/, '');
 
-export async function runLogin(): Promise<number> {
+export interface LoginCliFlags {
+  /** Force GitHub Device Flow (skip the default web-fallback path). */
+  github?: boolean;
+}
+
+export async function runLogin(flags: LoginCliFlags = {}): Promise<number> {
+  // Default: web-fallback. Works for any Supabase provider the website
+  // supports (GitHub, Apple, Email magic-link, WeChat, …) because identity
+  // is established in the browser, not in the cli.
+  //
+  // --github keeps the original GitHub Device Flow path for users on
+  // pure-cli machines where opening a browser is awkward (servers via ssh,
+  // chroots, etc.) — Device Flow only needs the printed URL + code.
+  if (!flags.github) {
+    const result = await performWebLogin();
+    if (!result.ok) {
+      console.error(`✗ login failed: ${result.reason}`);
+      if (result.code === 'timeout' || result.code === 'expired') {
+        console.error('   Hint: re-run `yome login`. If you cannot open a browser, use `yome login --github`.');
+      }
+      return 1;
+    }
+    console.log(`✓ logged in to Yome`);
+    console.log(`  yome user id: ${result.state!.yome_user_id}`);
+    return 0;
+  }
+
   const result = await performLogin();
   if (!result.ok) {
     console.error(`✗ login failed: ${result.reason}`);
     if (result.code === 'yome_user_not_found') {
-      console.error('   Hint: open https://yome.work, sign in once with the same GitHub account, then re-run `yome login`.');
+      console.error('   Hint: open https://yome.work, sign in once with the same GitHub account, then re-run `yome login --github`.');
+      console.error('   Or simply run `yome login` (without --github) to use the universal web flow.');
     }
     return 1;
   }
