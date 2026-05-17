@@ -1,9 +1,9 @@
 // `yome mesh ...` subcommand router.
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync, openSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync, openSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { startMeshDaemon } from '../mesh/index.js';
 import { getOrCreateDeviceId, loadDeviceState, safeHostname, updateDeviceMeta } from '../mesh/device-id.js';
 import { detectCapabilities } from '../mesh/capabilities.js';
@@ -92,6 +92,9 @@ async function doStart(_pos: string[], flags: MeshCliFlags): Promise<number> {
 }
 
 async function runForeground(flags: MeshCliFlags): Promise<number> {
+  // ensureMeshRoot first so MESH_PID has a parent dir; foreground path
+  // can also be invoked directly (systemd / launchd) without the
+  // background path creating ~/.yome/mesh/ for us.
   ensureMeshRoot();
   writeFileSync(MESH_PID, String(process.pid));
   let daemon: Awaited<ReturnType<typeof startMeshDaemon>> | null = null;
@@ -156,7 +159,6 @@ function doLogs(flags: MeshCliFlags): number {
   }
   if (flags.follow) {
     try {
-      const { execSync } = require('child_process') as typeof import('child_process');
       execSync(`tail -F "${MESH_STDOUT}" "${MESH_STDERR}"`, { stdio: 'inherit' });
     } catch { /* user interrupted */ }
     return 0;
@@ -207,7 +209,6 @@ function doRename(pos: string[]): number {
 
 function ensureMeshRoot(): void {
   try {
-    const { mkdirSync } = require('fs') as typeof import('fs');
     mkdirSync(MESH_ROOT, { recursive: true });
   } catch { /* ignore */ }
 }
