@@ -121,6 +121,7 @@ const cli = meow(
       // mesh flags
       as: { type: 'string' },              // `yome mesh start --as <hostname>`
       hubBase: { type: 'string' },         // dev override for hub base URL
+      tui: { type: 'boolean' },            // `yome mesh start --tui` mounts a thin-client TUI
     },
   },
 );
@@ -184,6 +185,7 @@ if (cli.input[0] === 'mesh') {
     follow: !!cli.flags.follow,
     as: typeof cli.flags.as === 'string' ? cli.flags.as : undefined,
     hubBase: typeof cli.flags.hubBase === 'string' ? cli.flags.hubBase : undefined,
+    tui: !!cli.flags.tui,
   });
   process.exit(exit);
 }

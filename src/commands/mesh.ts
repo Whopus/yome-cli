@@ -1,6 +1,6 @@
 // `yome mesh ...` subcommand router.
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync, openSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync, openSync, mkdirSync, appendFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn, execSync } from 'child_process';
@@ -19,6 +19,14 @@ export interface MeshCliFlags {
   follow?: boolean;
   as?: string;
   hubBase?: string;
+  /**
+   * `yome mesh start --tui` mounts an Ink-based thin-client UI on top
+   * of the running mesh daemon. The daemon continues to serve RPCs in
+   * the background; the TUI just subscribes to the same WS as a chat
+   * surface (so iOS / macOS messages stream into the terminal in
+   * real time, and lines typed at the prompt round-trip through Cloud).
+   */
+  tui?: boolean;
 }
 
 export async function runMeshSubcommand(args: string[], flags: MeshCliFlags): Promise<number> {
@@ -45,6 +53,9 @@ function printHelp(): void {
 
   start [--foreground]   Connect to Yome Cloud as a mesh device.
                          Without --foreground, runs detached in the background.
+  start --tui            Same, but also mount a chat TUI in this terminal.
+                         iOS / macOS messages stream into it live; lines you
+                         type round-trip through Cloud. Forces foreground.
   stop                   Stop the running mesh daemon (SIGTERM).
   status                 Show daemon pid + device id + capabilities.
   logs [-f]              Print mesh daemon log (use -f / --follow to tail).
@@ -68,8 +79,10 @@ async function doStart(_pos: string[], flags: MeshCliFlags): Promise<number> {
     return 1;
   }
   // Foreground = the path systemd / launchd / `--foreground` from
-  // an admin invokes; the daemon owns this process.
-  if (flags.foreground) {
+  // an admin invokes; the daemon owns this process. The TUI flag also
+  // forces foreground (Ink can only attach to a real TTY, not the
+  // background log file we redirect into).
+  if (flags.foreground || flags.tui) {
     return runForeground(flags);
   }
   // Detach a background child running ourselves in foreground.
@@ -98,24 +111,57 @@ async function runForeground(flags: MeshCliFlags): Promise<number> {
   ensureMeshRoot();
   writeFileSync(MESH_PID, String(process.pid));
   let daemon: Awaited<ReturnType<typeof startMeshDaemon>> | null = null;
+  let tuiUnmount: (() => void) | null = null;
   const teardown = () => {
+    try { tuiUnmount?.(); } catch { /* ignore */ }
     try { daemon?.shutdown(); } catch { /* ignore */ }
     try { if (existsSync(MESH_PID)) unlinkSync(MESH_PID); } catch { /* ignore */ }
     process.exit(0);
   };
   process.on('SIGINT', teardown);
   process.on('SIGTERM', teardown);
+
+  // Logger: if TUI is on, NEVER write to stdout (Ink owns the screen).
+  // Tee everything to ~/.yome/mesh/mesh.tui.log instead so the user
+  // can `tail -F` from another terminal.
+  const tuiLogPath = join(MESH_ROOT, 'mesh.tui.log');
+  const log = flags.tui
+    ? (level: 'info' | 'warn' | 'error', msg: string, meta?: Record<string, unknown>): void => {
+        try {
+          const line = `${new Date().toISOString()} [${level}] ${msg}${meta ? ' ' + JSON.stringify(meta) : ''}\n`;
+          appendFileSync(tuiLogPath, line);
+        } catch { /* ignore */ }
+      }
+    : undefined;
+
   try {
     daemon = await startMeshDaemon({
       hubBase: flags.hubBase,
       asName: flags.as,
+      log,
     });
   } catch (err) {
     console.error(`✗ mesh start failed: ${(err as Error).message}`);
     try { if (existsSync(MESH_PID)) unlinkSync(MESH_PID); } catch { /* ignore */ }
     return 1;
   }
-  // Block forever; the daemon owns timers + WS.
+
+  if (flags.tui) {
+    // Lazy-load Ink + MeshApp so non-TUI callers (systemd, background
+    // detached child) never pay the React render cost or pull stdin.
+    const { render } = await import('ink');
+    const { default: React } = await import('react');
+    const { MeshApp } = await import('../ui/MeshApp.js');
+    const instance = render(React.createElement(MeshApp, { daemon }));
+    tuiUnmount = () => instance.unmount();
+    // Block on Ink's own lifecycle: when the user exits the TUI
+    // (Ctrl-C in MeshApp -> useApp().exit()), waitUntilExit resolves.
+    await instance.waitUntilExit();
+    teardown();
+    return 0;
+  }
+
+  // Headless: block forever; the daemon owns timers + WS.
   return new Promise<number>(() => { /* never resolves */ });
 }
 
